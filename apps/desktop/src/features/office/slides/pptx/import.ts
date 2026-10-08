@@ -1,8 +1,38 @@
 import type JSZip from 'jszip'
-import type { Anchor, ArrowHead, Background, BodyStyle, Box, Color, Crop, Dash, Deck, Fill, FontRef, LayoutId, NumberStyle, Paragraph, Placeholder, PlaceholderRole, ShapeKind, Slide, SlideElement, SlideSize, Slot, Stroke, TextAlign, TextBody, Theme, Transition } from '../deck.ts'
+import type {
+  Anchor,
+  ArrowHead,
+  Background,
+  BodyStyle,
+  Box,
+  Color,
+  Crop,
+  Dash,
+  Deck,
+  Fill,
+  FontRef,
+  LayoutId,
+  NumberStyle,
+  Paragraph,
+  Placeholder,
+  PlaceholderRole,
+  ShapeKind,
+  Slide,
+  SlideElement,
+  SlideSize,
+  Slot,
+  Stroke,
+  TableCell,
+  TableElement,
+  TextAlign,
+  TextBody,
+  Theme,
+  Transition
+} from '../deck.ts'
 import { ARROW_HEADS, EMU_PER_POINT, LAYOUTS, newId, NUMBER_STYLES, SHAPE_KINDS, SLIDE_SIZES, SLOTS } from '../deck.ts'
 import { imageElement, lineElement, type Point, rotatePoint, shapeElement, textElement } from '../elements.ts'
 import { LAYOUT_NAMES, newSlide, PROMPTS } from '../layouts.ts'
+import { MAX_COLUMNS, MAX_ROWS, settleSpans } from '../tables.ts'
 import { bulletFor, isBlank, MAX_LEVEL, numberingFor, ownStyle, paragraphIndent, tidyRuns } from '../text.ts'
 import { colorIn, isColorElement, OFFICE_SCHEME, type Paint, type Palette, readColorMap, readScheme, SCHEME_NAMES, themeColor } from './color.ts'
 import { imageSize } from './image-size.ts'
@@ -14,9 +44,10 @@ import { attr, child, childrenNamed, descendants, elements, find, flagAttr, numb
  * Reading a PowerPoint file (.pptx, and .pptm the same way) into a Herald deck. Parts are found
  * through their relationships, as PowerPoint finds them. Each slide's shapes are read back to front
  * with what their placeholders, layout, master and theme lend them, and become Herald's text boxes,
- * shapes, lines and pictures. What Herald has no element for is shown as the nearest thing it has
- * (a gradient as one colour, a group as its members) or left out, and the report counts every
- * element once, as kept, approximated or left out, with the reasons.
+ * shapes, lines, pictures and tables (their styles worked out into each cell). What Herald has no
+ * element for is shown as the nearest thing it has (a gradient as one colour, a group as its
+ * members) or left out, and the report counts every element once, as kept, approximated or left
+ * out, with the reasons.
  */
 
 /** How deep groups may nest before what is deeper is left out. */
@@ -60,7 +91,12 @@ const WHY = {
   format: 'pictures in formats Herald cannot show',
   missing: 'pictures missing from the file left out',
   linked: 'pictures linked from outside the file left out',
-  tables: 'tables left out; they come in a later version',
+  emptyTables: 'tables without cells left out',
+  bigTables: 'table rows and columns past 75 left out',
+  tableStyles: 'table styles not in the file shown as the default table style',
+  tableBorders: 'table borders shown as one kind of line for the whole table',
+  diagonals: 'diagonal lines in table cells left out',
+  turnedTables: 'turned tables shown upright',
   backgroundStretch: 'background pictures fill the slide without stretching',
   backgroundTiles: 'tiled backgrounds shown as one picture',
   radial: 'radial gradient backgrounds shown as linear ones',
@@ -466,6 +502,8 @@ interface Context {
   masters: Map<string, Promise<Master | undefined>>
   layouts: Map<string, Promise<Layout | undefined>>
   pictures: Map<string, Promise<Loaded>>
+  /** The table styles the file holds (`a:tblStyle`), by id. */
+  tableStyles: Map<string, XmlElement>
   /** Masters and layouts whose shapes are counted already, and backgrounds whose approximations are. */
   counted: Set<string>
 }
@@ -1558,14 +1596,247 @@ function olePicture(data: XmlElement | undefined): XmlElement | undefined {
     .find((pic) => pic !== undefined) ?? descendants(data, 'p:pic')[0]
 }
 
+const TABLE_FLAGS = ['firstRow', 'lastRow', 'firstCol', 'lastCol', 'bandRow', 'bandCol'] as const
+
+type TableFlags = Record<(typeof TABLE_FLAGS)[number], boolean>
+
+const CELL_SIDES = ['a:lnL', 'a:lnR', 'a:lnT', 'a:lnB'] as const
+const STYLE_SIDES = ['a:left', 'a:right', 'a:top', 'a:bottom', 'a:insideH', 'a:insideV'] as const
+
+/** PowerPoint's default table style, Medium Style 2 in the first accent: PowerPoint knows it without a file holding it. */
+const DEFAULT_TABLE_STYLE = '{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}'
+
+const styleLine = (width: number): string => `<a:ln w="${width}" cmpd="sng"><a:solidFill><a:schemeClr val="lt1"/></a:solidFill></a:ln>`
+const styleFill = (tint?: number): string => `<a:fill><a:solidFill><a:schemeClr val="accent1">${tint ? `<a:tint val="${tint}"/>` : ''}</a:schemeClr></a:solidFill></a:fill>`
+const styleEdge = (part: string, side?: string): string =>
+  `<a:${part}><a:tcTxStyle b="on"><a:fontRef idx="minor"/><a:schemeClr val="lt1"/></a:tcTxStyle><a:tcStyle>${side ? `<a:tcBdr><a:${side}>${styleLine(38100)}</a:${side}></a:tcBdr>` : ''}${styleFill()}</a:tcStyle></a:${part}>`
+
+const DEFAULT_STYLE = parseXml(
+  `<a:tblStyle xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" styleId="${DEFAULT_TABLE_STYLE}"><a:wholeTbl><a:tcTxStyle><a:fontRef idx="minor"/><a:schemeClr val="dk1"/></a:tcTxStyle><a:tcStyle><a:tcBdr>${STYLE_SIDES.map((side) => `<${side}>${styleLine(12700)}</${side}>`).join('')}</a:tcBdr>${styleFill(20000)}</a:tcStyle></a:wholeTbl><a:band1H><a:tcStyle>${styleFill(40000)}</a:tcStyle></a:band1H><a:band1V><a:tcStyle>${styleFill(40000)}</a:tcStyle></a:band1V>${styleEdge('lastCol')}${styleEdge('firstCol')}${styleEdge('lastRow', 'top')}${styleEdge('firstRow', 'bottom')}</a:tblStyle>`
+)
+
+/** The parts of a table style that reach a cell, the most general first, as PowerPoint lays them over each other. */
+function styleParts(style: XmlElement | undefined, flags: TableFlags, row: number, column: number, rows: number, columns: number): XmlElement[] {
+  const firstRow = flags.firstRow && row === 0
+  const lastRow = flags.lastRow && row === rows - 1
+  const firstCol = flags.firstCol && column === 0
+  const lastCol = flags.lastCol && column === columns - 1
+  const across = row - (flags.firstRow ? 1 : 0)
+  const down = column - (flags.firstCol ? 1 : 0)
+  const names = [
+    'a:wholeTbl',
+    flags.bandCol && !firstCol && !lastCol ? (down % 2 ? 'a:band2V' : 'a:band1V') : '',
+    flags.bandRow && !firstRow && !lastRow ? (across % 2 ? 'a:band2H' : 'a:band1H') : '',
+    firstCol ? 'a:firstCol' : '',
+    lastCol ? 'a:lastCol' : '',
+    firstRow ? 'a:firstRow' : '',
+    lastRow ? 'a:lastRow' : ''
+  ]
+
+  return names.flatMap((name) => {
+    const part = name ? child(style, name) : undefined
+
+    return part ? [part] : []
+  })
+}
+
+/** A table style part's text look (`a:tcTxStyle`) as a list style, to lay under a cell's own. */
+function partTextStyle(part: XmlElement): XmlElement | undefined {
+  const text = child(part, 'a:tcTxStyle')
+
+  if (!text) {
+    return undefined
+  }
+
+  const color = elements(text).find(isColorElement)
+  const font = attr(child(text, 'a:fontRef'), 'idx')
+  const typeface = font === 'major' ? '+mj-lt' : font === 'minor' ? '+mn-lt' : attr(find(text, 'a:font/a:latin'), 'typeface')
+  const toggle = (name: string): string | undefined => (attr(text, name) === 'on' ? '1' : attr(text, name) === 'off' ? '0' : undefined)
+
+  return xml('a:lstStyle', {}, [xml('a:defPPr', {}, [xml('a:defRPr', { b: toggle('b'), i: toggle('i') }, [...(color ? [xml('a:solidFill', {}, [color])] : []), ...(typeface ? [xml('a:latin', { typeface })] : [])])])])
+}
+
+/** The fill the style gives a cell (the last of its parts with one), and what `phClr` stands for in it. */
+function partFill(parts: readonly XmlElement[], scope: Scope): { element: XmlElement; placeholder: Paint | null } | undefined {
+  for (const part of [...parts].reverse()) {
+    const style = child(part, 'a:tcStyle')
+    const own = elements(child(style, 'a:fill')).find((node) => FILLS.has(node.name))
+    const ref = child(style, 'a:fillRef')
+    const element = own ?? themeFill(ref, scope.master.theme)
+
+    if (element) {
+      return { element, placeholder: own ? null : colorIn(ref, scope.palette) }
+    }
+  }
+
+  return undefined
+}
+
+/** About how tall a cell's text is, a line a paragraph: PowerPoint grows a row to its text, so a file may give a row less. */
+function textHeight(body: TextBody): number {
+  return body.paragraphs.reduce((sum, paragraph) => {
+    const lines = 1 + paragraph.runs.reduce((breaks, run) => breaks + (run.text.match(/\n/g)?.length ?? 0), 0)
+    const size = Math.max(...paragraph.runs.map((run) => run.size ?? body.style.size))
+
+    return sum + lines * size * 1.2 * (paragraph.lineSpacing ?? 1)
+  }, body.inset[1] + body.inset[3])
+}
+
+/** A table cell (`a:tc`) with what the table's style gives it, and the lines it says it has on each side (undefined where it says nothing). */
+function readCell(tc: XmlElement | undefined, parts: readonly XmlElement[], back: XmlElement | undefined, scope: Scope, issues: Set<string>): { cell: TableCell; sides: (Stroke | null | undefined)[] } {
+  const props = child(tc, 'a:tcPr') ?? xml('a:tcPr')
+  const sources: TextSources = { styles: [scope.ctx.defaults, scope.master.styles.other, ...parts.map(partTextStyle), find(tc, 'a:txBody/a:lstStyle')], bodies: [], title: false }
+  const text = readBody(child(tc, 'a:txBody'), sources, scope, issues)
+  const own = elements(props).find((node) => FILLS.has(node.name))
+  const styled = partFill(parts, scope)
+  const read = own ? readFill(own, scope.palette, null, issues) : styled ? readFill(styled.element, scope.palette, styled.placeholder, issues) : readFill(back, scope.palette, null, issues)
+  const vertical = attr(props, 'vert')
+  const across = Math.round(numberAttr(tc, 'gridSpan', 1))
+  const down = Math.round(numberAttr(tc, 'rowSpan', 1))
+
+  if (read.picture) {
+    issues.add(WHY.pictureFill)
+  }
+
+  if (vertical && vertical !== 'horz' && !isBlank(text)) {
+    issues.add(WHY.vertical)
+  }
+
+  if (['a:lnTlToBr', 'a:lnBlToTr'].some((name) => readStroke(child(props, name), scope.palette, null, issues))) {
+    issues.add(WHY.diagonals)
+  }
+
+  const body: TextBody = {
+    ...text,
+    anchor: ANCHORS[attr(props, 'anchor') ?? 't'] ?? 'top',
+    inset: [insetOf(props, 'marL', 91440), insetOf(props, 'marT', 45720), insetOf(props, 'marR', 91440), insetOf(props, 'marB', 45720)],
+    fit: 'none',
+    wrap: true
+  }
+
+  return {
+    cell: { body, fill: read.fill, ...(across > 1 ? { colSpan: across } : {}), ...(down > 1 ? { rowSpan: down } : {}) },
+    sides: CELL_SIDES.map((side) => (child(props, side) ? readStroke(child(props, side), scope.palette, null, issues) : undefined))
+  }
+}
+
+const strokeKey = (stroke: Stroke | null): string => (stroke ? `${stroke.color} ${stroke.width} ${stroke.dash} ${stroke.alpha ?? 1}` : 'none')
+
+/**
+ * A table (`a:tbl`) as Herald's: its grid, rows at least as tall as their text, and cells with
+ * merged ones whole, the table's style worked out into each cell's fill and text. Its borders
+ * become the one line Herald draws them all with: the kind most used, the cells' own or else the
+ * style's.
+ */
+function readTable(frame: XmlElement, tbl: XmlElement, scope: Scope, at: readonly Transform[]): SlideElement[] {
+  const info = find(frame, 'p:nvGraphicFramePr/p:cNvPr')
+  const own = placementOf(child(frame, 'p:xfrm'))
+  const placement = place(own, at)
+  const grid = childrenNamed(child(tbl, 'a:tblGrid'), 'a:gridCol')
+  const trs = childrenNamed(tbl, 'a:tr')
+  const across = Math.min(MAX_COLUMNS, grid.length || Math.max(0, ...trs.map((tr) => childrenNamed(tr, 'a:tc').length)))
+  const down = Math.min(MAX_ROWS, trs.length)
+  const issues = new Set<string>()
+
+  if (!across || !down) {
+    count(scope.report, 'table', 'skipped', WHY.emptyTables)
+
+    return []
+  }
+
+  const tblPr = child(tbl, 'a:tblPr')
+  const styleId = textOf(child(tblPr, 'a:tableStyleId')).trim()
+  const style = styleId ? (scope.ctx.tableStyles.get(styleId) ?? DEFAULT_STYLE) : undefined
+  const flags = Object.fromEntries(TABLE_FLAGS.map((name) => [name, flagAttr(tblPr, name) === true])) as TableFlags
+  const back = elements(tblPr).find((node) => FILLS.has(node.name))
+  const sx = own.width ? placement.width / own.width : 1
+  const sy = own.height ? placement.height / own.height : 1
+  const sides: (Stroke | null | undefined)[] = []
+  const styleLines: (Stroke | null)[] = []
+
+  if (grid.length > MAX_COLUMNS || trs.length > MAX_ROWS) {
+    issues.add(WHY.bigTables)
+  }
+
+  if (placement.rotation) {
+    issues.add(WHY.turnedTables)
+  }
+
+  if (styleId && !scope.ctx.tableStyles.has(styleId) && styleId !== DEFAULT_TABLE_STYLE) {
+    issues.add(WHY.tableStyles)
+  }
+
+  const cells = Array.from({ length: down }, (_, r) => {
+    const tcs = childrenNamed(trs[r], 'a:tc')
+
+    return Array.from({ length: across }, (_, c) => {
+      const parts = styleParts(style, flags, r, c, down, across)
+      const read = readCell(tcs[c], parts, back, scope, issues)
+      sides.push(...read.sides)
+
+      for (const side of parts.flatMap((part) => STYLE_SIDES.map((name) => find(part, `a:tcStyle/a:tcBdr/${name}/a:ln`)))) {
+        if (side) {
+          styleLines.push(readStroke(side, scope.palette, null, issues))
+        }
+      }
+
+      return read.cell
+    })
+  })
+  const settled = settleSpans(cells, across)
+  const written = sides.filter((side): side is Stroke | null => side !== undefined)
+  const kinds = new Map<string, { stroke: Stroke | null; uses: number }>()
+
+  for (const line of written.length ? written : styleLines) {
+    const kind = kinds.get(strokeKey(line)) ?? { stroke: line, uses: 0 }
+    kind.uses++
+    kinds.set(strokeKey(line), kind)
+  }
+
+  if (kinds.size > 1) {
+    issues.add(WHY.tableBorders)
+  }
+
+  const columns = Array.from({ length: across }, (_, c) => round2(Math.max(1, (grid[c] ? pt(numberAttr(grid[c], 'w', 0)) : own.width / across) * sx)))
+  const rows = Array.from({ length: down }, (_, r) => {
+    const needed = Math.max(0, ...settled[r].map((cell) => (cell.merged || (cell.rowSpan ?? 1) > 1 ? 0 : textHeight(cell.body))))
+
+    return round2(Math.max(1, pt(numberAttr(trs[r], 'h', 0)) * sy, needed))
+  })
+  const stroke = [...kinds.values()].filter((kind) => kind.stroke).sort((a, b) => b.uses - a.uses)[0]?.stroke ?? null
+  const table: TableElement = {
+    id: newId('table'),
+    kind: 'table',
+    x: round2(placement.x),
+    y: round2(placement.y),
+    width: round2(columns.reduce((sum, width) => sum + width, 0)),
+    height: round2(rows.reduce((sum, height) => sum + height, 0)),
+    rotation: 0,
+    ...nameOf(info),
+    columns,
+    rows,
+    cells: settled,
+    stroke
+  }
+
+  tally(scope.report, 'table', issues)
+
+  return [table]
+}
+
 async function readFrame(frame: XmlElement, scope: Scope, at: readonly Transform[]): Promise<SlideElement[]> {
   const data = find(frame, 'a:graphic/a:graphicData')
   const kind = frameKind(attr(data, 'uri') ?? '')
+  const table = kind === 'table' ? child(data, 'a:tbl') : undefined
 
   if (flagAttr(find(frame, 'p:nvGraphicFramePr/p:cNvPr'), 'hidden')) {
     count(scope.report, kind, 'skipped', WHY.hidden)
 
     return []
+  }
+
+  if (table) {
+    return readTable(frame, table, scope, at)
   }
 
   const picture = kind === 'ole' ? olePicture(data) : undefined
@@ -1574,7 +1845,7 @@ async function readFrame(frame: XmlElement, scope: Scope, at: readonly Transform
     return readPicture(picture, scope, at, 'ole', frame)
   }
 
-  count(scope.report, kind, 'skipped', kind === 'table' ? WHY.tables : undefined)
+  count(scope.report, kind, 'skipped', kind === 'table' ? WHY.emptyTables : undefined)
 
   return []
 }
@@ -1915,6 +2186,7 @@ export async function importPresentation(zip: JSZip, title: string): Promise<{ d
     masters: new Map(),
     layouts: new Map(),
     pictures: new Map(),
+    tableStyles: new Map(childrenNamed(await pkg.xml(targetOf(relationships, 'tableStyles')), 'a:tblStyle').map((style) => [attr(style, 'styleId') ?? '', style])),
     counted: new Set()
   }
   ctx.first = (firstPath ? await masterAt(ctx, firstPath) : undefined) ?? ctx.first

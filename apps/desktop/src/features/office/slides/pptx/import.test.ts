@@ -1,7 +1,8 @@
 import JSZip from 'jszip'
 import PptxGenJS from 'pptxgenjs'
 import { describe, expect, it } from 'vitest'
-import type { Deck, ImageElement, LineElement, ShapeElement, Slide, SlideElement, TextElement } from '../deck.ts'
+import type { Deck, ImageElement, LineElement, ShapeElement, Slide, SlideElement, TableElement, TextElement } from '../deck.ts'
+import { plainText } from '../text.ts'
 import { colorIn, OFFICE_SCHEME, type Paint, type Palette, STANDARD_MAP } from './color.ts'
 import { imageSize } from './image-size.ts'
 import { importPresentation } from './import.ts'
@@ -919,8 +920,87 @@ describe('importPresentation: backgrounds', () => {
   })
 })
 
+const TABLE = 'http://schemas.openxmlformats.org/drawingml/2006/table'
+
+/** A table cell: its text, its own attributes (merging) and its properties. */
+const tc = (text: string, attrs = '', props = '<a:tcPr/>'): string => `<a:tc${attrs}><a:txBody><a:bodyPr/><a:lstStyle/>${text ? paragraph(run(text)) : '<a:p/>'}</a:txBody>${props}</a:tc>`
+
+/** A table in a frame at (50, 60), 200 by 100: grid column widths, then each row's height and cells. */
+const tableFrame = (grid: readonly number[], rows: readonly [number, string][], tblPr = '<a:tblPr/>', name = 'Table'): string =>
+  frame(TABLE, `<a:tbl>${tblPr}<a:tblGrid>${grid.map((width) => `<a:gridCol w="${emu(width)}"/>`).join('')}</a:tblGrid>${rows.map(([height, cells]) => `<a:tr h="${emu(height)}">${cells}</a:tr>`).join('')}</a:tbl>`, name)
+
+const sides = (color: string, width = 1): string => ['a:lnL', 'a:lnR', 'a:lnT', 'a:lnB'].map((side) => `<${side} w="${emu(width)}">${solid(srgb(color))}</${side}>`).join('')
+
+const tableTexts = (table: TableElement) => table.cells.map((row) => row.map((cell) => (cell.merged ? '·' : plainText(cell.body))))
+
+describe('importPresentation: tables', () => {
+  it('reads a table’s grid, rows, merged cells, text, fills and lines', async () => {
+    const lines = sides('000000')
+    const content = tableFrame(
+      [80, 120],
+      [
+        [40, tc('Name', ' gridSpan="2"', `<a:tcPr marL="0" anchor="ctr">${lines}${solid(srgb('FF0000'))}</a:tcPr>`) + tc('', ' hMerge="1"', `<a:tcPr>${lines}</a:tcPr>`)],
+        [30, tc('Oslo', ' rowSpan="2"', `<a:tcPr>${lines}<a:noFill/></a:tcPr>`) + tc('12', '', `<a:tcPr>${lines}${solid(scheme('accent2'))}</a:tcPr>`)],
+        [30, tc('', ' vMerge="1"', `<a:tcPr>${lines}</a:tcPr>`) + tc('8', '', `<a:tcPr>${lines}</a:tcPr>`)]
+      ]
+    )
+    const { slide, report } = await shapes(content)
+    const table = named<TableElement>(slide, 'Table')
+
+    expect(table).toMatchObject({ kind: 'table', x: 50, y: 60, width: 200, height: 100, rotation: 0, columns: [80, 120], rows: [40, 30, 30], stroke: { color: '#000000', width: 1, dash: 'solid' } })
+    expect(tableTexts(table)).toEqual([
+      ['Name', '·'],
+      ['Oslo', '12'],
+      ['·', '8']
+    ])
+    expect(table.cells.map((row) => row.map((cell) => (cell.merged ? '·' : `${cell.colSpan ?? 1}x${cell.rowSpan ?? 1}`)))).toEqual([
+      ['2x1', '·'],
+      ['1x2', '1x1'],
+      ['·', '1x1']
+    ])
+    expect(table.cells[0][0]).toMatchObject({ fill: { color: '#ff0000' }, body: { anchor: 'middle', inset: [0, 3.6, 7.2, 3.6] } })
+    expect([table.cells[1][0].fill, table.cells[1][1].fill, table.cells[2][1].fill]).toEqual([null, { color: 'accent2' }, null])
+    expect(counts(report)).toEqual({ table: { imported: 1, approximated: 0, skipped: 0 } })
+  })
+
+  it('works a table style in the file out into each cell’s fill and text, its lines into the table’s', async () => {
+    const id = '{11111111-2222-3333-4444-555555555555}'
+    const styles = `${HEADER}<a:tblStyleLst xmlns:a="${A}" def="${id}"><a:tblStyle styleId="${id}" styleName="Mine"><a:wholeTbl><a:tcTxStyle><a:fontRef idx="minor"/>${scheme('dk1')}</a:tcTxStyle><a:tcStyle><a:tcBdr><a:insideH>${line(2, srgb('00FF00'))}</a:insideH></a:tcBdr><a:fill>${solid(srgb('EEEEEE'))}</a:fill></a:tcStyle></a:wholeTbl><a:band1H><a:tcStyle><a:fill>${solid(srgb('CCCCCC'))}</a:fill></a:tcStyle></a:band1H><a:firstRow><a:tcTxStyle b="on">${scheme('lt1')}</a:tcTxStyle><a:tcStyle><a:fill>${solid(scheme('accent2'))}</a:fill></a:tcStyle></a:firstRow></a:tblStyle></a:tblStyleLst>`
+    const rows: [number, string][] = ['Head', 'One', 'Two', 'Three'].map((text) => [25, tc(text)])
+    const { slide, report } = await shapes(tableFrame([200], rows, `<a:tblPr firstRow="1" bandRow="1"><a:tableStyleId>${id}</a:tableStyleId></a:tblPr>`), {
+      files: { 'ppt/tableStyles.xml': styles },
+      presentationRels: [['rIdStyles', 'tableStyles', 'tableStyles.xml']]
+    })
+    const table = named<TableElement>(slide, 'Table')
+
+    expect(table.cells.map(([cell]) => cell.fill?.color)).toEqual(['accent2', '#cccccc', '#eeeeee', '#cccccc'])
+    expect(table.cells[0][0].body.style).toMatchObject({ color: 'bg1', bold: true })
+    expect(table.cells[1][0].body.style).toMatchObject({ color: 'tx1' })
+    expect(table.cells[1][0].body.style.bold).toBeFalsy()
+    expect(table.stroke).toEqual({ color: '#00ff00', width: 2, dash: 'solid' })
+    expect(counts(report)).toEqual({ table: { imported: 1, approximated: 0, skipped: 0 } })
+  })
+
+  it('shows PowerPoint’s default style when the file names it without holding it, and reports what it simplifies', async () => {
+    const styled = (id: string, name: string) => tableFrame([100, 100], [[40, tc('A') + tc('B')], [30, tc('1') + tc('2')], [30, tc('3') + tc('4')]], `<a:tblPr firstRow="1" bandRow="1"><a:tableStyleId>${id}</a:tableStyleId></a:tblPr>`, name)
+    const turned = tableFrame([200], [[100, tc('Up')]], '<a:tblPr/>', 'Turned').replace('<p:xfrm>', '<p:xfrm rot="5400000">')
+    const { slide, report } = await shapes(styled('{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}', 'Default') + styled('{00000000-0000-0000-0000-000000000000}', 'Unknown') + turned)
+    const table = named<TableElement>(slide, 'Default')
+    const fills = table.cells.map((row) => row[0].fill?.color)
+
+    expect(fills[0]).toBe('accent1')
+    expect(fills.slice(1).every((color) => /^#[0-9a-f]{6}$/.test(color ?? ''))).toBe(true)
+    expect(new Set(fills).size).toBe(3)
+    expect(table.cells[0][0].body.style).toMatchObject({ color: 'bg1', bold: true })
+    expect(table.stroke).toEqual({ color: 'bg1', width: 1, dash: 'solid' })
+    expect(named<TableElement>(slide, 'Turned').rotation).toBe(0)
+    expect(counts(report)).toEqual({ table: { imported: 0, approximated: 3, skipped: 0 } })
+    expect(report.reasons).toEqual({ 'table borders shown as one kind of line for the whole table': 2, 'table styles not in the file shown as the default table style': 1, 'turned tables shown upright': 1 })
+  })
+})
+
 describe('importPresentation: what Herald leaves out', () => {
-  it('counts tables, charts, SmartArt, ink and hidden objects as left out', async () => {
+  it('counts charts, SmartArt, ink, hidden objects and tables without cells as left out', async () => {
     const content = [
       frame('http://schemas.openxmlformats.org/drawingml/2006/table', '<a:tbl/>'),
       frame('http://schemas.openxmlformats.org/drawingml/2006/chart', '<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rIdChart"/>'),
@@ -944,7 +1024,7 @@ describe('importPresentation: what Herald leaves out', () => {
       ink: { imported: 0, approximated: 0, skipped: 1 },
       other: { imported: 0, approximated: 0, skipped: 1 }
     })
-    expect(report.reasons).toEqual({ 'tables left out; they come in a later version': 1, 'hidden objects left out': 2 })
+    expect(report.reasons).toEqual({ 'tables without cells left out': 1, 'hidden objects left out': 2 })
   })
 
   it('reports transitions, animations, timings, embedded fonts, macros, comments and sections', async () => {
@@ -1008,7 +1088,7 @@ describe('importPresentation: what Herald leaves out', () => {
       'Left out: 1 table.',
       'Gradient fills shown as a solid colour (2).',
       'Pattern fills shown as a solid colour.',
-      'Tables left out; they come in a later version.',
+      'Tables without cells left out.',
       'Not kept: embedded fonts.'
     ])
     expect(reportNotes((await shapes(sp({ name: 'Kept', textBox: true, props: xfrm(0, 0, 10, 10), text: paragraph(run('Fine')) }))).report)).toEqual([])
@@ -1128,7 +1208,7 @@ describe('importPresentation: PptxGenJS decks', () => {
       pptx.addSlide().hidden = true
     })
     const [slide, hidden] = deck.slides
-    const [title, list, shape, rule, picture] = slide.elements as [TextElement, TextElement, ShapeElement, LineElement, ImageElement]
+    const [title, list, shape, rule, picture, table] = slide.elements as [TextElement, TextElement, ShapeElement, LineElement, ImageElement, TableElement]
 
     expect(deck.size).toEqual({ width: 960, height: 540 })
     expect(slide).toMatchObject({ layout: 'blank', background: { kind: 'solid', color: '#f1f1f1' }, notes: 'Speaker notes', hidden: false })
@@ -1143,12 +1223,18 @@ describe('importPresentation: PptxGenJS decks', () => {
     expect(Object.keys(shape.adjust ?? {})).toEqual(['adj'])
     expect(rule).toMatchObject({ kind: 'line', x: 432, y: 216, width: 144, height: 0, flipH: true, start: 'triangle', end: 'oval', stroke: { color: '#333333', width: 1 } })
     expect(picture).toMatchObject({ kind: 'image', x: 648, y: 72, width: 36, height: 36, alt: 'A dot', natural: { width: 1, height: 1 }, crop: { left: 0, top: 0, right: 0.5, bottom: 0.5 } })
+    expect(table).toMatchObject({ kind: 'table', x: 72, y: 360, width: 288, columns: [144, 144], stroke: null })
+    expect(table.cells[0].map((cell) => [plainText(cell.body), cell.fill])).toEqual([
+      ['A', null],
+      ['B', null]
+    ])
+    expect(table.rows[0]).toBeGreaterThan(12)
     expect(counts(report)).toEqual({
       text: { imported: 2, approximated: 0, skipped: 0 },
       shape: { imported: 1, approximated: 0, skipped: 0 },
       picture: { imported: 1, approximated: 0, skipped: 0 },
       line: { imported: 1, approximated: 0, skipped: 0 },
-      table: { imported: 0, approximated: 0, skipped: 1 },
+      table: { imported: 1, approximated: 0, skipped: 0 },
       chart: { imported: 0, approximated: 0, skipped: 1 }
     })
   })

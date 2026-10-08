@@ -1,6 +1,6 @@
 import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
-import { type Deck, type ImageElement, type LineElement, type ShapeElement, SLIDE_SIZES, type TextElement } from '../deck.ts'
+import { type Deck, type ImageElement, type LineElement, type ShapeElement, SLIDE_SIZES, type TableElement, type TextElement } from '../deck.ts'
 import { placeholderFor } from '../layouts.ts'
 import * as model from '../model.ts'
 import { settleSpans, withCell } from '../tables.ts'
@@ -375,6 +375,19 @@ describe('reading Herald’s files without its own copy', () => {
     expect(flat).toMatchObject({ kind: 'line', x: 100, y: 500, width: 300, height: 20, start: 'none', end: 'none' })
     expect(Boolean(flat.flipH) || Boolean(flat.flipV)).toBe(false)
     expect(picture).toMatchObject({ kind: 'image', alt: 'A dot', crop: { left: 0.1, top: 0.2, right: 0.05, bottom: 0 } })
+
+    const table = back.slides[2].elements[5] as TableElement
+    expect(table).toMatchObject({ kind: 'table', x: 560, y: 360, width: 360, height: 120, columns: [120, 120, 120], rows: [40, 40, 40], stroke: { color: 'bg1', width: 1, dash: 'solid' } })
+    expect(table.cells.map((row) => row.map((cell) => (cell.merged ? '·' : plainText(cell.body))))).toEqual([
+      ['Team', '·', 'Size'],
+      ['North', 'Oslo', '12'],
+      ['·', 'Bergen', '8']
+    ])
+    expect(table.cells[0][0]).toMatchObject({ colSpan: 2, fill: { color: 'accent1' }, body: { style: { color: 'bg1', bold: true } } })
+    expect(table.cells[1][0].rowSpan).toBe(2)
+    expect(table.cells[1][1]).toMatchObject({ fill: { color: 'accent1', alpha: 0.4 }, body: { anchor: 'middle', style: { color: 'accent2', bold: true }, paragraphs: [{ align: 'center' }] } })
+    expect(table.cells[1][2].fill).toEqual({ color: '#ffcc00' })
+    expect(read.notes.join(' ')).not.toMatch(/table/i)
     expect(back.slides[2].background).toMatchObject({ kind: 'gradient', angle: 90 })
     expect(back.slides[3].background?.kind).toBe('image')
   })
