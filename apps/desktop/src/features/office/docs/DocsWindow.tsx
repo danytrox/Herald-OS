@@ -16,7 +16,7 @@ import { activeEditor, docsSession } from './store.ts'
 import { TABLE_ACTIONS } from './table-menu.ts'
 import { DocsToolbar } from './Toolbar.tsx'
 
-const STYLE_KEYS: Record<string, string> = { normal: 'mod+alt+0', heading1: 'mod+alt+1', heading2: 'mod+alt+2', heading3: 'mod+alt+3' }
+const STYLE_SHORTCUTS: Record<string, string> = { normal: 'mod+alt+0', heading1: 'mod+alt+1', heading2: 'mod+alt+2', heading3: 'mod+alt+3' }
 
 /** Whether the page of the document in front passes `test`, for the checks in Page Setup. */
 const pageIs = (test: (page: PageSettings) => boolean) => () => {
@@ -27,17 +27,17 @@ const pageIs = (test: (page: PageSettings) => boolean) => () => {
 
 function docsMenus(): OfficeMenu[] {
   const has = act.hasEditor
-  const mark = (id: act.MarkName, label: string, keys: string): OfficeCommand => ({ id, label, keys, enabled: has, checked: () => act.isActive(id), run: () => act.toggleMark(id) })
+  const mark = (id: act.MarkName, label: string, shortcut: string): OfficeCommand => ({ id, label, shortcut, enabled: has, checked: () => act.isActive(id), run: () => act.toggleMark(id) })
 
   const insert: OfficeCommand[] = [
-    { id: 'link', label: 'Link…', keys: 'mod+k', enabled: has, run: act.editLink },
+    { id: 'link', label: 'Link…', shortcut: 'mod+k', enabled: has, run: act.editLink },
     { id: 'picture', label: 'Picture…', enabled: has, run: () => $pickImage.set($pickImage.get() + 1) },
     { id: 'insert-table', label: 'Table', enabled: has, run: () => act.table(3, 3) },
     { id: 'rule', label: 'Divider', enabled: has, run: act.rule, dividerBefore: true },
-    { id: 'page-break', label: 'Page Break', keys: 'mod+enter', enabled: has, run: act.pageBreak },
+    { id: 'page-break', label: 'Page Break', shortcut: 'mod+enter', enabled: has, run: act.pageBreak },
     { id: 'panel', label: 'Panel', enabled: has, run: () => act.callout('info'), submenu: (Object.entries(CALLOUT_LABELS) as [CalloutKind, string][]).map(([kind, label]) => ({ id: `panel-${kind}`, label, enabled: has, run: () => act.callout(kind) })) },
-    { id: 'code-block', label: 'Code Block', keys: 'mod+alt+c', enabled: has, run: () => act.style('code'), dividerBefore: true },
-    { id: 'quote', label: 'Quote', keys: 'mod+shift+b', enabled: has, run: () => act.style('quote') }
+    { id: 'code-block', label: 'Code Block', shortcut: 'mod+alt+c', enabled: has, run: () => act.style('code'), dividerBefore: true },
+    { id: 'quote', label: 'Quote', shortcut: 'mod+shift+b', enabled: has, run: () => act.style('quote') }
   ]
 
   const format: OfficeCommand[] = [
@@ -48,14 +48,14 @@ function docsMenus(): OfficeMenu[] {
     mark('superscript', 'Superscript', 'mod+.'),
     mark('subscript', 'Subscript', 'mod+,'),
     mark('code', 'Code', 'mod+shift+m'),
-    { id: 'clear', label: 'Clear Formatting', keys: 'mod+\\', enabled: has, run: act.clear },
+    { id: 'clear', label: 'Clear Formatting', shortcut: 'mod+\\', enabled: has, run: act.clear },
     {
       id: 'style',
       label: 'Paragraph Style',
       enabled: has,
       dividerBefore: true,
       run: () => {},
-      submenu: BLOCK_STYLES.map((entry) => ({ id: `style-${entry.id}`, label: entry.label, keys: STYLE_KEYS[entry.id], enabled: has, checked: () => Boolean(activeEditor() && styleAt(activeEditor()!.state) === entry.id), run: () => act.style(entry.id) }))
+      submenu: BLOCK_STYLES.map((entry) => ({ id: `style-${entry.id}`, label: entry.label, shortcut: STYLE_SHORTCUTS[entry.id], enabled: has, checked: () => Boolean(activeEditor() && styleAt(activeEditor()!.state) === entry.id), run: () => act.style(entry.id) }))
     },
     {
       id: 'align',
@@ -63,10 +63,10 @@ function docsMenus(): OfficeMenu[] {
       enabled: has,
       run: () => {},
       submenu: [
-        { id: 'align-left', label: 'Left', keys: 'mod+l', enabled: has, run: () => act.align('left') },
-        { id: 'align-center', label: 'Centre', keys: 'mod+e', enabled: has, run: () => act.align('center') },
-        { id: 'align-right', label: 'Right', keys: 'mod+r', enabled: has, run: () => act.align('right') },
-        { id: 'align-justify', label: 'Justify', keys: 'mod+j', enabled: has, run: () => act.align('justify') }
+        { id: 'align-left', label: 'Left', shortcut: 'mod+l', enabled: has, run: () => act.align('left') },
+        { id: 'align-center', label: 'Centre', shortcut: 'mod+e', enabled: has, run: () => act.align('center') },
+        { id: 'align-right', label: 'Right', shortcut: 'mod+r', enabled: has, run: () => act.align('right') },
+        { id: 'align-justify', label: 'Justify', shortcut: 'mod+j', enabled: has, run: () => act.align('justify') }
       ]
     },
     { id: 'spacing', label: 'Line Spacing', enabled: has, run: () => {}, submenu: LINE_SPACINGS.map((entry) => ({ id: `spacing-${entry.value}`, label: entry.label, enabled: has, run: () => act.lineSpacing(entry.value) })) },
@@ -76,13 +76,13 @@ function docsMenus(): OfficeMenu[] {
       enabled: has,
       run: () => {},
       submenu: [
-        { id: 'list-bullet', label: 'Bulleted List', keys: 'mod+shift+8', enabled: has, checked: () => act.isActive('bulletList'), run: () => act.list('bullet') },
-        { id: 'list-ordered', label: 'Numbered List', keys: 'mod+shift+7', enabled: has, checked: () => act.isActive('orderedList'), run: () => act.list('ordered') },
-        { id: 'list-task', label: 'Checklist', keys: 'mod+shift+9', enabled: has, checked: () => act.isActive('taskList'), run: () => act.list('task') }
+        { id: 'list-bullet', label: 'Bulleted List', shortcut: 'mod+shift+8', enabled: has, checked: () => act.isActive('bulletList'), run: () => act.list('bullet') },
+        { id: 'list-ordered', label: 'Numbered List', shortcut: 'mod+shift+7', enabled: has, checked: () => act.isActive('orderedList'), run: () => act.list('ordered') },
+        { id: 'list-task', label: 'Checklist', shortcut: 'mod+shift+9', enabled: has, checked: () => act.isActive('taskList'), run: () => act.list('task') }
       ]
     },
-    { id: 'indent', label: 'Increase Indent', keys: 'mod+]', enabled: has, run: () => act.shiftIndent(1) },
-    { id: 'outdent', label: 'Decrease Indent', keys: 'mod+[', enabled: has, run: () => act.shiftIndent(-1) },
+    { id: 'indent', label: 'Increase Indent', shortcut: 'mod+]', enabled: has, run: () => act.shiftIndent(1) },
+    { id: 'outdent', label: 'Decrease Indent', shortcut: 'mod+[', enabled: has, run: () => act.shiftIndent(-1) },
     {
       id: 'page',
       label: 'Page Setup',
@@ -121,17 +121,17 @@ function docsMenus(): OfficeMenu[] {
 
   const key = () => docsSession.$activeKey.get()
   const view: OfficeCommand[] = [
-    { id: 'zoom-in', label: 'Zoom In', keys: 'mod+=', enabled: has, run: () => key() && act.zoom(key()!, 'in') },
-    { id: 'zoom-out', label: 'Zoom Out', keys: 'mod+-', enabled: has, run: () => key() && act.zoom(key()!, 'out') },
-    { id: 'zoom-reset', label: 'Actual Size', keys: 'mod+0', enabled: has, run: () => key() && act.zoom(key()!, 'reset') }
+    { id: 'zoom-in', label: 'Zoom In', shortcut: 'mod+=', enabled: has, run: () => key() && act.zoom(key()!, 'in') },
+    { id: 'zoom-out', label: 'Zoom Out', shortcut: 'mod+-', enabled: has, run: () => key() && act.zoom(key()!, 'out') },
+    { id: 'zoom-reset', label: 'Actual Size', shortcut: 'mod+0', enabled: has, run: () => key() && act.zoom(key()!, 'reset') }
   ]
 
   return officeMenus({
     session: docsSession,
     canSave: true,
     edit: [
-      { id: 'find', label: 'Find…', keys: 'mod+f', enabled: has, run: () => act.openFind(false), dividerBefore: true },
-      { id: 'replace', label: 'Replace…', keys: 'mod+shift+h', enabled: has, run: () => act.openFind(true) }
+      { id: 'find', label: 'Find…', shortcut: 'mod+f', enabled: has, run: () => act.openFind(false), dividerBefore: true },
+      { id: 'replace', label: 'Replace…', shortcut: 'mod+shift+h', enabled: has, run: () => act.openFind(true) }
     ],
     menus: [
       { id: 'insert', label: 'Insert', items: insert },

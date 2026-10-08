@@ -75,7 +75,7 @@ function freezeFirst(which: 'row' | 'column' | 'none'): void {
 
 function sheetMenus(): { edit: OfficeCommand[]; menus: OfficeMenu[] } {
   return {
-    edit: [univerCommand('find', 'Find…', 'ui.operation.open-find-dialog', { dividerBefore: true, keys: 'mod+f' }), univerCommand('replace', 'Find and Replace…', 'ui.operation.open-replace-dialog')],
+    edit: [univerCommand('find', 'Find…', 'ui.operation.open-find-dialog', { dividerBefore: true, shortcut: 'mod+f' }), univerCommand('replace', 'Find and Replace…', 'ui.operation.open-replace-dialog')],
     menus: [
       {
         id: 'format',

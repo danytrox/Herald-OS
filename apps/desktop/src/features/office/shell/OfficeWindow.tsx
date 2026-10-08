@@ -18,7 +18,7 @@ function menuItems(commands: readonly OfficeCommand[]): MenuItemDef[] {
   return commands.map((command) => ({
     id: command.id,
     label: command.label,
-    hint: command.keys ? keysLabel(command.keys) : undefined,
+    hint: command.shortcut ? keysLabel(command.shortcut) : undefined,
     disabled: !(command.enabled?.() ?? true),
     checked: command.checked?.(),
     dividerBefore: command.dividerBefore,

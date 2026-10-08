@@ -56,19 +56,19 @@ export function BubbleBar({ editor, frame, tick }: { editor: Editor; frame: HTML
 
   return (
     <div role="toolbar" aria-label="Selection" className="float menu-surface absolute z-30 flex items-center gap-0.5 rounded-xl p-1 animate-pop" style={{ width: WIDTH, left: clampLeft(frame, anchor.left, WIDTH), top: Math.max(4, anchor.top - 44) }} onMouseDown={(event) => event.preventDefault()}>
-      <ToolButton label="Bold" keys="mod+b" active={state.bold} onClick={() => act.toggleMark('bold')}>
+      <ToolButton label="Bold" shortcut="mod+b" active={state.bold} onClick={() => act.toggleMark('bold')}>
         <IconBold />
       </ToolButton>
-      <ToolButton label="Italic" keys="mod+i" active={state.italic} onClick={() => act.toggleMark('italic')}>
+      <ToolButton label="Italic" shortcut="mod+i" active={state.italic} onClick={() => act.toggleMark('italic')}>
         <IconItalic />
       </ToolButton>
-      <ToolButton label="Underline" keys="mod+u" active={state.underline} onClick={() => act.toggleMark('underline')}>
+      <ToolButton label="Underline" shortcut="mod+u" active={state.underline} onClick={() => act.toggleMark('underline')}>
         <IconUnderline />
       </ToolButton>
-      <ToolButton label="Strikethrough" keys="mod+shift+x" active={state.strike} onClick={() => act.toggleMark('strike')}>
+      <ToolButton label="Strikethrough" shortcut="mod+shift+x" active={state.strike} onClick={() => act.toggleMark('strike')}>
         <IconStrikethrough />
       </ToolButton>
-      <ToolButton label="Link" keys="mod+k" active={state.link} onClick={act.editLink}>
+      <ToolButton label="Link" shortcut="mod+k" active={state.link} onClick={act.editLink}>
         <IconLink />
       </ToolButton>
       <ToolButton label="Red text" onClick={() => act.color('#c00000')}>

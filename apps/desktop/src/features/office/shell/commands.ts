@@ -11,7 +11,7 @@ export interface OfficeCommand {
   id: string
   label: string
   /** `mod` is ⌘ on the Mac and Ctrl elsewhere. */
-  keys?: string
+  shortcut?: string
   run: () => void
   enabled?: () => boolean
   checked?: () => boolean
@@ -47,11 +47,11 @@ export function officeMenus<Model>(source: MenuSource<Model>): OfficeMenu[] {
       id: 'file',
       label: 'File',
       items: [
-        { id: 'new', label: 'New', keys: 'mod+n', run: () => session.create() },
-        { id: 'open', label: 'Open…', keys: 'mod+o', enabled: () => source.canOpen !== false, run: () => void session.openPicked() },
-        { id: 'save', label: 'Save', keys: 'mod+s', enabled: () => hasDoc() && source.canSave, run: () => void session.save().catch(() => {}), dividerBefore: true },
-        { id: 'save-as', label: 'Save As…', keys: 'mod+shift+s', enabled: () => hasDoc() && source.canSave, run: () => void session.save(doc(), { as: true }).catch(() => {}) },
-        { id: 'export-pdf', label: 'Export as PDF…', keys: 'mod+p', enabled: hasDoc, run: () => void session.exportPdf() },
+        { id: 'new', label: 'New', shortcut: 'mod+n', run: () => session.create() },
+        { id: 'open', label: 'Open…', shortcut: 'mod+o', enabled: () => source.canOpen !== false, run: () => void session.openPicked() },
+        { id: 'save', label: 'Save', shortcut: 'mod+s', enabled: () => hasDoc() && source.canSave, run: () => void session.save().catch(() => {}), dividerBefore: true },
+        { id: 'save-as', label: 'Save As…', shortcut: 'mod+shift+s', enabled: () => hasDoc() && source.canSave, run: () => void session.save(doc(), { as: true }).catch(() => {}) },
+        { id: 'export-pdf', label: 'Export as PDF…', shortcut: 'mod+p', enabled: hasDoc, run: () => void session.exportPdf() },
         ...(source.file ?? []),
         {
           id: 'notes',
@@ -66,7 +66,7 @@ export function officeMenus<Model>(source: MenuSource<Model>): OfficeMenu[] {
           },
           dividerBefore: true
         },
-        { id: 'close', label: 'Close', keys: 'mod+w', enabled: hasDoc, run: () => session.$dialog.set({ kind: 'close', key: doc()!.key }), dividerBefore: true }
+        { id: 'close', label: 'Close', shortcut: 'mod+w', enabled: hasDoc, run: () => session.$dialog.set({ kind: 'close', key: doc()!.key }), dividerBefore: true }
       ]
     },
     {
@@ -84,7 +84,7 @@ const everyCommand = (commands: readonly OfficeCommand[]): OfficeCommand[] => co
 export function runShortcut(event: KeyboardEvent | ReactKeyboardEvent, menus: readonly OfficeMenu[]): boolean {
   for (const menu of menus) {
     for (const command of everyCommand(menu.items)) {
-      if (command.keys && matches(event, command.keys) && (command.enabled?.() ?? true)) {
+      if (command.shortcut && matches(event, command.shortcut) && (command.enabled?.() ?? true)) {
         command.run()
 
         return true

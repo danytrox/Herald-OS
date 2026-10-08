@@ -42,8 +42,8 @@ import { BLOCK_STYLES, styleAt } from './model.ts'
 import { $editors } from './store.ts'
 import { tableMenu } from './table-menu.ts'
 
-export function ToolButton({ label, keys, onClick, active, disabled, children, className }: { label: string; keys?: string; onClick: () => void; active?: boolean; disabled?: boolean; children: ReactNode; className?: string }) {
-  const title = keys ? `${label} (${keysLabel(keys)})` : label
+export function ToolButton({ label, shortcut, onClick, active, disabled, children, className }: { label: string; shortcut?: string; onClick: () => void; active?: boolean; disabled?: boolean; children: ReactNode; className?: string }) {
+  const title = shortcut ? `${label} (${keysLabel(shortcut)})` : label
 
   return (
     <button
@@ -249,19 +249,19 @@ function readState(editor: Editor): ToolbarState {
 }
 
 const ALIGNMENTS = [
-  { id: 'left', label: 'Align left', keys: 'mod+l', icon: <IconAlignLeft /> },
-  { id: 'center', label: 'Centre', keys: 'mod+e', icon: <IconAlignCenter /> },
-  { id: 'right', label: 'Align right', keys: 'mod+r', icon: <IconAlignRight /> },
-  { id: 'justify', label: 'Justify', keys: 'mod+j', icon: <IconAlignJustified /> }
+  { id: 'left', label: 'Align left', shortcut: 'mod+l', icon: <IconAlignLeft /> },
+  { id: 'center', label: 'Centre', shortcut: 'mod+e', icon: <IconAlignCenter /> },
+  { id: 'right', label: 'Align right', shortcut: 'mod+r', icon: <IconAlignRight /> },
+  { id: 'justify', label: 'Justify', shortcut: 'mod+j', icon: <IconAlignJustified /> }
 ] as const
 
 const MARKS = [
-  { id: 'bold', label: 'Bold', keys: 'mod+b', icon: <IconBold /> },
-  { id: 'italic', label: 'Italic', keys: 'mod+i', icon: <IconItalic /> },
-  { id: 'underline', label: 'Underline', keys: 'mod+u', icon: <IconUnderline /> },
-  { id: 'strike', label: 'Strikethrough', keys: 'mod+shift+x', icon: <IconStrikethrough /> },
-  { id: 'superscript', label: 'Superscript', keys: 'mod+.', icon: <IconSuperscript /> },
-  { id: 'subscript', label: 'Subscript', keys: 'mod+,', icon: <IconSubscript /> }
+  { id: 'bold', label: 'Bold', shortcut: 'mod+b', icon: <IconBold /> },
+  { id: 'italic', label: 'Italic', shortcut: 'mod+i', icon: <IconItalic /> },
+  { id: 'underline', label: 'Underline', shortcut: 'mod+u', icon: <IconUnderline /> },
+  { id: 'strike', label: 'Strikethrough', shortcut: 'mod+shift+x', icon: <IconStrikethrough /> },
+  { id: 'superscript', label: 'Superscript', shortcut: 'mod+.', icon: <IconSuperscript /> },
+  { id: 'subscript', label: 'Subscript', shortcut: 'mod+,', icon: <IconSubscript /> }
 ] as const
 
 /** Herald Docs' formatting bar for the document in front, once its editor is there. */
@@ -282,10 +282,10 @@ function ToolbarFor({ editor }: { editor: Editor }) {
 
   return (
     <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-0.5 border-b border-line px-2 py-1 text-[12px]" role="toolbar" aria-label="Formatting">
-      <ToolButton label="Undo" keys="mod+z" disabled={!state?.canUndo} onClick={() => editor.chain().focus().undo().run()}>
+      <ToolButton label="Undo" shortcut="mod+z" disabled={!state?.canUndo} onClick={() => editor.chain().focus().undo().run()}>
         <IconArrowBackUp />
       </ToolButton>
-      <ToolButton label="Redo" keys="mod+shift+z" disabled={!state?.canRedo} onClick={() => editor.chain().focus().redo().run()}>
+      <ToolButton label="Redo" shortcut="mod+shift+z" disabled={!state?.canRedo} onClick={() => editor.chain().focus().redo().run()}>
         <IconArrowForwardUp />
       </ToolButton>
       <Divider />
@@ -300,7 +300,7 @@ function ToolbarFor({ editor }: { editor: Editor }) {
       <Dropdown title="Font size" width="w-14" disabled={off} label={<span className="tabular-nums">{shownSize}</span>} items={() => [{ id: 'default', label: 'Style’s size', checked: !state?.size, onSelect: () => act.fontSize(null) }, ...SIZES.map((size, index) => ({ id: String(size), label: String(size), checked: size === state?.size, dividerBefore: index === 0, onSelect: () => act.fontSize(size) }))]} />
       <Divider />
       {MARKS.map((mark) => (
-        <ToolButton key={mark.id} label={mark.label} keys={mark.keys} disabled={off} active={state?.marks[mark.id]} onClick={() => act.toggleMark(mark.id)}>
+        <ToolButton key={mark.id} label={mark.label} shortcut={mark.shortcut} disabled={off} active={state?.marks[mark.id]} onClick={() => act.toggleMark(mark.id)}>
           {mark.icon}
         </ToolButton>
       ))}
@@ -308,7 +308,7 @@ function ToolbarFor({ editor }: { editor: Editor }) {
       <ColorButton label="Highlight" icon={<IconHighlight />} colors={HIGHLIGHTS} current={state?.highlight ?? null} automatic="No highlight" onPick={act.highlight} />
       <Divider />
       {ALIGNMENTS.map((entry) => (
-        <ToolButton key={entry.id} label={entry.label} keys={entry.keys} disabled={off} active={state?.align === entry.id} onClick={() => act.align(entry.id)}>
+        <ToolButton key={entry.id} label={entry.label} shortcut={entry.shortcut} disabled={off} active={state?.align === entry.id} onClick={() => act.align(entry.id)}>
           {entry.icon}
         </ToolButton>
       ))}
@@ -319,23 +319,23 @@ function ToolbarFor({ editor }: { editor: Editor }) {
         items={() => [{ id: 'style', label: 'Style’s spacing', checked: state?.lineHeight === null, onSelect: () => act.lineSpacing(null) }, ...LINE_SPACINGS.map((entry, index) => ({ id: String(entry.value), label: entry.label, checked: state?.lineHeight === entry.value, dividerBefore: index === 0, onSelect: () => act.lineSpacing(entry.value) }))]}
       />
       <Divider />
-      <ToolButton label="Bulleted list" keys="mod+shift+8" disabled={off} active={state?.list === 'bullet'} onClick={() => act.list('bullet')}>
+      <ToolButton label="Bulleted list" shortcut="mod+shift+8" disabled={off} active={state?.list === 'bullet'} onClick={() => act.list('bullet')}>
         <IconList />
       </ToolButton>
-      <ToolButton label="Numbered list" keys="mod+shift+7" disabled={off} active={state?.list === 'ordered'} onClick={() => act.list('ordered')}>
+      <ToolButton label="Numbered list" shortcut="mod+shift+7" disabled={off} active={state?.list === 'ordered'} onClick={() => act.list('ordered')}>
         <IconListNumbers />
       </ToolButton>
-      <ToolButton label="Checklist" keys="mod+shift+9" disabled={off} active={state?.list === 'task'} onClick={() => act.list('task')}>
+      <ToolButton label="Checklist" shortcut="mod+shift+9" disabled={off} active={state?.list === 'task'} onClick={() => act.list('task')}>
         <IconListCheck />
       </ToolButton>
-      <ToolButton label="Decrease indent" keys="mod+[" disabled={off} onClick={() => act.shiftIndent(-1)}>
+      <ToolButton label="Decrease indent" shortcut="mod+[" disabled={off} onClick={() => act.shiftIndent(-1)}>
         <IconIndentDecrease />
       </ToolButton>
-      <ToolButton label="Increase indent" keys="mod+]" disabled={off} onClick={() => act.shiftIndent(1)}>
+      <ToolButton label="Increase indent" shortcut="mod+]" disabled={off} onClick={() => act.shiftIndent(1)}>
         <IconIndentIncrease />
       </ToolButton>
       <Divider />
-      <ToolButton label="Link" keys="mod+k" disabled={off} active={state?.link} onClick={act.editLink}>
+      <ToolButton label="Link" shortcut="mod+k" disabled={off} active={state?.link} onClick={act.editLink}>
         <IconLink />
       </ToolButton>
       <ToolButton label="Picture" disabled={off} onClick={() => picker.current?.click()}>
@@ -356,7 +356,7 @@ function ToolbarFor({ editor }: { editor: Editor }) {
       <ToolButton label="Divider" disabled={off} onClick={act.rule}>
         <IconSeparatorHorizontal />
       </ToolButton>
-      <ToolButton label="Page break" keys="mod+enter" disabled={off} onClick={act.pageBreak}>
+      <ToolButton label="Page break" shortcut="mod+enter" disabled={off} onClick={act.pageBreak}>
         <IconPageBreak />
       </ToolButton>
       <Dropdown
@@ -369,7 +369,7 @@ function ToolbarFor({ editor }: { editor: Editor }) {
         ]}
       />
       <Divider />
-      <ToolButton label="Clear formatting" keys="mod+\" disabled={off} onClick={act.clear}>
+      <ToolButton label="Clear formatting" shortcut="mod+\" disabled={off} onClick={act.clear}>
         <IconClearFormatting />
       </ToolButton>
       {state?.table && (

@@ -171,10 +171,10 @@ const duplicate = onDeck((doc) => {
 })
 
 const SLIDE_COMMANDS: OfficeCommand[] = [
-  { id: 'new-slide', label: 'New Slide', keys: 'mod+shift+n', enabled: hasDeck, run: () => newSlide('title-body') },
-  { id: 'duplicate-slide', label: 'Duplicate Slide', keys: 'mod+d', enabled: hasDeck, run: duplicate },
+  { id: 'new-slide', label: 'New Slide', shortcut: 'mod+shift+n', enabled: hasDeck, run: () => newSlide('title-body') },
+  { id: 'duplicate-slide', label: 'Duplicate Slide', shortcut: 'mod+d', enabled: hasDeck, run: duplicate },
   { id: 'delete-slide', label: 'Delete Slide', enabled: hasDeck, run: onDeck((doc) => doc.commit(removeSlide(doc.history.present, doc.slide.id), 'Delete Slide', { selected: null })) },
-  { id: 'present', label: 'Present', keys: 'mod+shift+enter', enabled: hasDeck, run: () => present(false), dividerBefore: true },
+  { id: 'present', label: 'Present', shortcut: 'mod+shift+enter', enabled: hasDeck, run: () => present(false), dividerBefore: true },
   { id: 'present-start', label: 'Present from the Start', enabled: hasDeck, run: () => present(true) }
 ]
 
