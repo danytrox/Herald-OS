@@ -1,5 +1,5 @@
 import { type CsvLayout, parseCsv, serializeCsv } from './csv.ts'
-import { CELL_TYPE, type CellMatrix, type CellSnapshot, cellsOf, hasContent, isStyled, newSheet, newWorkbook, type SheetSnapshot, type WorkbookSnapshot } from './workbook.ts'
+import { CELL_TYPE, type CellMatrix, type CellSnapshot, cellsOf, hasContent, isStyled, newSheet, newWorkbook, plainTextOf, type SheetSnapshot, type WorkbookSnapshot } from './workbook.ts'
 
 /*
  * A CSV file as a one-sheet workbook and back. Numbers become numbers unless that would change
@@ -67,7 +67,7 @@ export function fieldFromCell(cell: CellSnapshot | undefined, pattern?: string |
   }
 
   if (value === undefined || value === null || value === '') {
-    return cell.f && cell.v === undefined ? cell.f : ''
+    return cell.f && cell.v === undefined ? cell.f : plainTextOf(cell)
   }
 
   return String(value)
@@ -144,5 +144,9 @@ export function csvFromWorkbook(workbook: WorkbookSnapshot, options: { sheetId?:
     ...(sheet?.mergeData?.length ? ['Merged cells are saved as separate cells.'] : [])
   ]
 
-  return { text: serializeCsv(rows, options.layout), losses }
+  // Every row as wide as the widest, as Excel writes CSV: some readers refuse rows with fewer fields.
+  const width = rows.reduce((widest, fields) => Math.max(widest, fields.length), 0)
+  const even = rows.map((fields) => (fields.length < width ? [...fields, ...Array<string>(width - fields.length).fill('')] : fields))
+
+  return { text: serializeCsv(even, options.layout), losses }
 }

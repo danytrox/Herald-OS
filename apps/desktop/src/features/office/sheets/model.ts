@@ -1,6 +1,7 @@
 import { BorderStyleTypes, BorderType, type ICellData, IUndoRedoService, type Univer } from '@univerjs/core'
 import { FUniver } from '@univerjs/core/facade'
 import type { FRange, FWorkbook, FWorksheet } from '@univerjs/sheets/facade'
+import { type CellSnapshot, plainTextOf } from '../../../../shared/office/workbook.ts'
 import { type CellRange, columnIndex, columnName, MAX_COLUMNS, MAX_ROWS, parseRange, rangeName, splitSheet } from '../../../../shared/office/xlsx/address.ts'
 
 /*
@@ -131,7 +132,7 @@ export function readRange(target: SheetsTarget, args: { range: unknown; sheet?: 
   return {
     sheet: sheet.getSheetName(),
     range: rangeName(cells),
-    values: data.map((row) => row.map((cell) => (cell?.t === 3 ? cell.v === 1 || cell.v === true : cell?.v === undefined || cell?.v === '' ? null : (cell.v as CellInput)))),
+    values: data.map((row) => row.map((cell) => (cell?.t === 3 ? cell.v === 1 || cell.v === true : cell?.v === undefined || cell?.v === null || cell?.v === '' ? plainTextOf(cell as CellSnapshot) || null : (cell.v as CellInput)))),
     formulas: range.getFormulas().map((row) => row.map((formula) => formula || null)),
     text: range.getDisplayValues()
   }

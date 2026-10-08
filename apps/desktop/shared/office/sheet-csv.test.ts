@@ -70,10 +70,25 @@ describe('workbookFromCsv and csvFromWorkbook', () => {
     expect(csvFromWorkbook(withoutAutomaticColor(newWorkbook('b', 'B', [newSheet('s', 'S', { 0: { 0: { v: 1, s: 'typed' } } })]), '#0c1431')).losses).toEqual([])
   })
 
+  it('writes the text of a cell Univer keeps as rich text alone, as it keeps text typed into a formatted cell', () => {
+    const typed = { body: { dataStream: 'Typed in\rHerald\r\n', textRuns: [{ st: 0, ed: 1, ts: { cl: { rgb: '#0c1431' } } }, { st: 1, ed: 15, ts: { ff: 'Calibri', fs: 11 } }] } }
+    const workbook = newWorkbook('book', 'Book', [newSheet('s', 'S', { 0: { 0: { v: null, p: typed }, 1: { v: 'plain' } }, 1: { 0: { v: 'x' } } })])
+
+    expect(csvFromWorkbook(workbook).text).toBe('"Typed in\nHerald",plain\nx,\n')
+  })
+
+  it('takes the automatic colour off the runs of rich text too', () => {
+    const p = { body: { dataStream: 'Ab\r\n', textRuns: [{ st: 0, ed: 1, ts: { cl: { rgb: '#0C1431' } } }, { st: 1, ed: 2, ts: { cl: { rgb: '#ff0000' }, bl: 1 } }] } }
+    const plain = withoutAutomaticColor(newWorkbook('book', 'Book', [newSheet('s', 'S', { 0: { 0: { p } } })]), '#0c1431')
+
+    expect((plain.sheets.s.cellData[0][0].p as typeof p).body.textRuns.map((run) => run.ts)).toEqual([{}, { cl: { rgb: '#ff0000' }, bl: 1 }])
+    expect(p.body.textRuns[0].ts).toEqual({ cl: { rgb: '#0C1431' } })
+  })
+
   it('writes the sheet it is asked for, with gaps as empty fields', () => {
     const sheet = newSheet('s', 'S', { 0: { 2: { v: 'c' } }, 2: { 0: { v: 'a' } } })
 
-    expect(csvFromWorkbook(newWorkbook('book', 'Book', [newSheet('t', 'T'), sheet]), { sheetId: 's' }).text).toBe(',,c\n\na\n')
+    expect(csvFromWorkbook(newWorkbook('book', 'Book', [newSheet('t', 'T'), sheet]), { sheetId: 's' }).text).toBe(',,c\n,,\na,,\n')
   })
 
   it('reads TRUE and FALSE as booleans and writes booleans back as words', () => {

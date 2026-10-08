@@ -66,7 +66,17 @@ export function* cellsOf(sheet: Pick<SheetSnapshot, 'cellData'>): Generator<{ ro
 }
 
 /** Whether a cell shows anything: a value or a formula. */
-export const hasContent = (cell: CellSnapshot | undefined): boolean => Boolean(cell) && ((cell!.v !== undefined && cell!.v !== null && cell!.v !== '') || Boolean(cell!.f))
+export const hasContent = (cell: CellSnapshot | undefined): boolean => Boolean(cell) && ((cell!.v !== undefined && cell!.v !== null && cell!.v !== '') || Boolean(cell!.f) || plainTextOf(cell) !== '')
+
+/**
+ * The text of a cell's rich text, line breaks as "\n". Univer keeps some cells as rich text alone,
+ * with no value: text typed into a formatted cell, whose first letter gets a run of its own, and linked text.
+ */
+export function plainTextOf(cell: CellSnapshot | undefined): string {
+  const stream = (cell?.p as { body?: { dataStream?: string } } | null | undefined)?.body?.dataStream ?? ''
+
+  return stream.replace(/\r?\n$/, '').replace(/\r$/, '').replace(/\r\n?/g, '\n')
+}
 
 const isEmptyStyle = (style: unknown): boolean => !style || (typeof style === 'object' && Object.keys(style).length === 0)
 
@@ -89,6 +99,21 @@ function withoutColor(style: Record<string, unknown>, automatic: string): Record
   const { cl: _automatic, ...rest } = style
 
   return rest
+}
+
+type TextRun = { st: number; ed: number; ts?: Record<string, unknown> }
+
+/** A cell whose rich text has runs in the automatic colour, without it. */
+function withoutRunColor(cell: CellSnapshot, automatic: string): CellSnapshot {
+  const body = (cell.p as { body?: { textRuns?: TextRun[] } } | null | undefined)?.body
+
+  if (!body?.textRuns?.some((run) => sameColor((run.ts?.cl as { rgb?: string } | undefined)?.rgb, automatic))) {
+    return cell
+  }
+
+  const textRuns = body.textRuns.map((run) => (run.ts ? { ...run, ts: withoutColor(run.ts, automatic) } : run))
+
+  return { ...cell, p: { ...(cell.p as object), body: { ...body, textRuns } } }
 }
 
 /**
@@ -119,7 +144,7 @@ export function withoutAutomaticColor(workbook: WorkbookSnapshot, automatic: str
 
       for (const [column, cell] of Object.entries(columns)) {
         const style = typeof cell.s === 'string' ? (emptied.has(cell.s) ? null : cell.s) : cell.s ? withoutColor(cell.s, automatic) : cell.s
-        const { s: _style, ...rest } = cell
+        const { s: _style, ...rest } = withoutRunColor(cell, automatic)
         cellData[Number(row)][Number(column)] = isEmptyStyle(style) ? rest : { ...rest, s: style }
       }
     }
