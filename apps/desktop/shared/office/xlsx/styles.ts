@@ -80,7 +80,10 @@ const PATTERN_DENSITY: Record<string, number> = {
 }
 
 /** Built-in date formats ExcelJS names as written for any locale; Excel in English shows them as these. */
-const SHOWN_AS: Record<string, string> = { 'mm-dd-yy': 'm/d/yyyy', 'm/d/yy h:mm': 'm/d/yyyy h:mm' }
+const SHOWN_AS: Record<string, string> = { 'mm-dd-yy': 'm/d/yyyy', 'm/d/yy h:mm': 'm/d/yyyy h:mm', 'm/d/yy "h":mm': 'm/d/yyyy h:mm' }
+
+/** The same formats saved under ExcelJS's names, so the file keeps the built-in ids Excel shows in the reader's own date order. */
+const SAVED_AS: Record<string, string> = { 'm/d/yyyy': 'mm-dd-yy', 'm/d/yyyy h:mm': 'm/d/yy "h":mm' }
 
 export interface StyleNotes {
   add: (note: string) => void
@@ -416,7 +419,7 @@ export function excelStyle(style: UStyle | null | undefined, base: BaseFont): Pa
   }
 
   if (style.n?.pattern) {
-    out.numFmt = style.n.pattern
+    out.numFmt = SAVED_AS[style.n.pattern] ?? style.n.pattern
   }
 
   return out

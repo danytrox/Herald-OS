@@ -41,8 +41,8 @@ function changedFrom(settings: Record<string, unknown>, defaults: Record<string,
 
 const NUMBER_TEXT = /^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/
 const DAY = 86400000
-const EPOCH_1900 = 25569
-const EPOCH_1904_SHIFT = 1462
+/** Day 0 of Excel's two date systems, as JavaScript times. */
+const EPOCH = { date1900: Date.UTC(1899, 11, 30), date1904: Date.UTC(1904, 0, 1) }
 
 /** The Normal font: the first font in styles.xml, which every cell without its own falls back on. */
 function normalFont(stylesXml: string | undefined, palette: Palette): BaseFont {
@@ -131,7 +131,8 @@ class StyleTable {
   }
 }
 
-const serialOf = (date: Date, date1904: boolean): number => date.getTime() / DAY + EPOCH_1900 - (date1904 ? EPOCH_1904_SHIFT : 0)
+// Whole milliseconds are subtracted before dividing: dividing first loses the last digits of a time, so it would change on every save.
+const serialOf = (date: Date, date1904: boolean): number => (date.getTime() - (date1904 ? EPOCH.date1904 : EPOCH.date1900)) / DAY
 
 /** A value (a cell's, or a formula's last result) as Univer's `v` and `t`. */
 function valueOf(value: unknown, date1904: boolean): Pick<CellSnapshot, 'v' | 't'> | null {
