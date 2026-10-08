@@ -177,7 +177,7 @@ The image editor (decision record: ADR-020; using it: [the manual](manual/canvas
 
 ## Herald Office
 
-Herald Docs, Sheets and Slides (decision record: ADR-021, a draft) live in `src/features/office`,
+Herald Docs, Sheets and Slides (decision record: ADR-021, proposed) live in `src/features/office`,
 with the formats in `shared/office` and file access in `electron/office`.
 
 - **One window for three apps** (`shell/OfficeWindow.tsx`): menus, document tabs, the status bar and
@@ -196,9 +196,12 @@ with the formats in `shared/office` and file access in `electron/office`.
   print view and the document API (`docs/model.ts`), which works on a live editor or a file's JSON.
   Word files go through Herald's own reader and the docx package (`shared/office/docx`), and the
   page spell-checks with suggestions on right-click (`electron/office/spelling.ts`).
-- **Slides** keeps its own deck (`slides/deck.ts`) and draws each slide with the Herald Canvas
-  engine at the size it is shown (`slides/render.ts`): the editor, the slide list, present mode and
-  PDF export all draw this way.
+- **Slides** is a DOM slide editor: a deck in points with PowerPoint's model (`slides/deck.ts`),
+  one view that draws a slide for the editor, the slide list, presenting and PDF export
+  (`slides/view/`), TipTap for the text in boxes, shapes and table cells (`slides/editor/`), and the
+  deck API (`slides/model.ts`, applied by `slides/live.ts`). PowerPoint files are written by
+  PptxGenJS with a finishing pass and read by Herald's own DrawingML reader (`slides/pptx/`), and
+  each file Herald saves carries its deck for exact reopening (`slides/pptx/herald-part.ts`).
 - **Main** reads and writes files whole and atomically, watches each open file's folder with a poll
   as a safety net (`file-watch.ts`), keeps what each window has open for Hermes, prints PDFs, and
   can convert OpenDocument files through headless LibreOffice when it is installed (`convert.ts`);
