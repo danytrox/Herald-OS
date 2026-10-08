@@ -188,15 +188,22 @@ with the formats in `shared/office` and file access in `electron/office`.
   `office-backups` under the Herald OS data folder the first time Herald writes over it in a session
   (`electron/office/backups.ts`). Herald saves a document by itself only once the person has saved
   it, and stops when a save would lose something new.
-- **Docs and Sheets** are Univer's open-source packages (`univer/`), one instance per open
-  document, in Herald's palette (`palette.ts`, `theme.ts`, `univer.css`); formulas are worked out in
-  a worker, and `headless.ts` runs Univer without a window for commands.
+- **Sheets** is Univer's open-source packages (`univer/`), one instance per open workbook, in
+  Herald's palette (`palette.ts`, `theme.ts`, `univer.css`); formulas are worked out in a worker,
+  `.xlsx` is read and written in another (`sheets/xlsx-worker.ts`), and `sheets/headless.ts` runs
+  Univer without a window for the workbook API (`sheets/model.ts`).
+- **Docs** is TipTap 3 (`docs/`): one schema (`docs/schema.ts`) for the editor, the converters, the
+  print view and the document API (`docs/model.ts`), which works on a live editor or a file's JSON.
+  Word files go through Herald's own reader and the docx package (`shared/office/docx`), and the
+  page spell-checks with suggestions on right-click (`electron/office/spelling.ts`).
 - **Slides** keeps its own deck (`slides/deck.ts`) and draws each slide with the Herald Canvas
   engine at the size it is shown (`slides/render.ts`): the editor, the slide list, present mode and
   PDF export all draw this way.
 - **Main** reads and writes files whole and atomically, watches each open file's folder with a poll
   as a safety net (`file-watch.ts`), keeps what each window has open for Hermes, prints PDFs, and
-  converts OpenDocument files through headless LibreOffice when it is installed (`convert.ts`).
+  can convert OpenDocument files through headless LibreOffice when it is installed (`convert.ts`);
+  no window converts through it yet, so `.odt`, `.ods` and `.odp` stay off in
+  `shared/office/files.ts`.
 
 ## System bridge
 

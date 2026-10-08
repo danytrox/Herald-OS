@@ -414,71 +414,107 @@ Compositor lacks. What only Herald has goes in fields of its own beside a record
   own (Compositor would refuse the project), and colour tables inside the manifest (Compositor
   refuses manifests over 4 MB, about what one 65-entry table takes as text).
 
-## ADR-021: Herald Office is built on Univer, with Herald Slides on the Canvas engine
+## ADR-021: Herald Office: Sheets on Univer, Docs on TipTap, Slides on a slide editor of its own
 
-**Status: Proposed.** A draft from the Herald Office spike; it becomes final once the format
-converters have shipped.
+**Status: Proposed.** Rewritten for what Herald Office's second phase built; it becomes final once
+Herald Slides has merged and the three apps have shipped. Herald Slides is still being finished,
+so its part below describes the design it is being built to.
 
 Herald OS needs documents, spreadsheets and presentations that Hermes can work in while the person
 watches, and that open and save the files people already have. Herald Docs, Herald Sheets and
-Herald Slides are built into the shell, the way Herald Canvas is (ADR-020): Docs and Sheets on
-Univer's open-source packages, Slides on the Herald Canvas engine, Office files through converters
-of our own, and every change Hermes makes going through the command registry (ADR-014) as one
-undoable step.
+Herald Slides are built into the shell, the way Herald Canvas is (ADR-020), each on the engine that
+suits it: Sheets on Univer's open-source packages, Docs on TipTap 3, and Slides on a DOM slide
+editor of Herald's own with TipTap text boxes. They share one Office window (tabs, sessions, the
+save policy, the fidelity dialog, backups and PDF export) and read and write Office files through
+converters of our own. Each app has a document API that Hermes's commands work through, on the
+document open in a window or on a file on disk, each change one step to undo; the commands
+themselves go through the command registry (ADR-014).
 
-- **Univer for Docs and Sheets, its open-source packages only.** Univer 1.0.3's Apache-2.0 packages
-  (core, design, ui, engine-render, engine-formula, rpc, docs and docs-ui, and sheets with its
-  formula, number format, filter, sort, conditional formatting and data validation plugins) run in
-  a Herald window with React 19.3 and Electron 44 as they are. They load only when an Office window
-  opens: the shell's main chunk carries none of Univer (the registration adds 6 KB to it); Docs
-  loads a shared 3.1 MB chunk (0.85 MB compressed) and Sheets another 3.3 MB (0.84 MB) and its
-  formula worker (7.2 MB, 1.7 MB compressed). In the packaged build a window is up 0.2 s after it is
-  asked for, and a new workbook draws 0.12 s later, a new document 0.35 s; the first workbook adds
-  about 26 MB of JavaScript heap and 58 MB to the window's process, worker included, and a document
-  after it 5 MB and 11 MB. Univer's paid packages (import and export, printing, charts, pivot tables,
-  collaboration) are not used.
+- **Herald Sheets on Univer 1.0.x, its free packages only.** The Apache-2.0 packages Sheets needs
+  are installed one by one at 1.0.3, never through a preset: core, design, ui, themes,
+  engine-render, engine-formula, rpc, docs and docs-ui (for the cell editor), and sheets with its
+  formula, number format, filter, sort, conditional formatting, data validation, find-and-replace
+  and hyperlink plugins. A test fails if `@univerjs-pro` or an advanced or collaboration preset
+  appears in the lockfile, or if a Univer package there has a licence other than Apache-2.0 (MIT
+  for its icons). Sheets loads only when its window opens: the shell's main chunk carries none of
+  Univer, and the Sheets window is a 6.3 MB chunk (1.6 MB compressed). In the packaged build a
+  window is up 0.2 s after it is asked for and a new workbook draws 0.12 s later; the first
+  workbook adds about 26 MB of JavaScript heap and 58 MB to the window's process, worker included.
+- **Formulas in a worker.** Sheets work formulas out in a module worker (7.4 MB, loaded with the
+  first workbook) that gets the filters too, so SUBTOTAL leaves out the rows a filter hides. On
+  20,000 rows of formulas the window's thread was blocked 141 ms instead of 889 ms, with results as
+  fast. `.xlsx` files are read and written through ExcelJS (MIT) in a worker of their own, with
+  what ExcelJS reads badly taken from the package itself. Both workers load from the app, so the
+  Content Security Policy needs no change (`worker-src` falls back to `script-src 'self'`), and
+  Univer uses no `eval`.
+- **Headless Univer for Hermes.** A command on a workbook that is not open in a window loads it
+  into a Univer instance with nothing drawn but every plugin that keeps data in the workbook
+  (Univer leaves out of a snapshot what no plugin loaded), changes it through Univer's Facade API
+  as one undo group and writes it back, in about 40 ms with its recalculation; a file holding what
+  Sheets cannot keep is left alone. In a browser the formula engine waits for the Rendered
+  lifecycle stage, which only Univer's chrome reaches, so a headless instance moves on to it
+  itself.
 - **Univer in Herald's colours.** Univer reads one palette for its chrome (CSS variables on the
-  page) and for the canvas it draws on, so Herald works it out from the theme's accent and
-  background when a window opens. In dark mode Univer inverts canvas colours: Sheets keeps that, a
-  dark grid that matches the glass, and Docs turns it off for its canvas, so pages are white paper
-  on a dark desk, as they will print. The outer chrome is made transparent to sit on the window's
-  glass, and it already uses Herald's UI font. Each Univer editor is a React root of its own, whose
+  page) and for its canvas, so Herald works it out from the theme's accent and background when a
+  window opens. In dark mode Univer puts canvas colours through a fixed matrix that turns light
+  into dark; Herald runs the matrix backwards to find the light shades that come out as the
+  theme's dark ones, so the grid matches the glass, and the outer chrome is transparent on it.
+  Office's fonts are drawn in the real font where it is installed, else in the one made to its
+  measurements (Carlito for Calibri, Caladea for Cambria); cells keep their font's name. Univer's
+  editors write their "automatic" text colour into what is typed; Herald saves it as no colour, so
+  a file never gains a colour nobody chose. Each Univer editor is a React root of its own, whose
   events never reach the window's React handlers, so the Office window takes its shortcuts and
   dropped files with native listeners.
-- **Formulas in a worker.** Sheets work formulas out in a module worker. On 20,000 rows of formulas
-  the window's thread was blocked 141 ms instead of 889 ms, with results as fast. The worker loads
-  from the app itself, so the Content Security Policy needs no change (`worker-src` falls back to
-  `script-src 'self'`), and Univer uses no `eval`.
-- **Headless Univer for Hermes.** A command that changes a file not open in a window loads it into
-  a Univer instance with no chrome and no drawing (models, commands and the formula engine), changes
-  it through Univer's Facade API and reads the snapshot back: about 40 ms for a workbook with its
-  recalculation, 5 ms for a document. In a browser Univer's formula engine waits for its Rendered
-  lifecycle stage, which only its chrome reaches, so a headless instance moves on to it itself.
-- **Herald Slides on the Canvas engine.** Univer Slides' open-source packages are not ready: in
-  1.0.3 a new slide does not appear in the slide list, Add Text always inserts "A New Text",
-  moving an element does nothing, a shape in a saved deck is not drawn, multi-line text shows only
-  its last line, slide edits cannot be undone, and there is no present mode, layouts, themes,
-  speaker notes or Facade API. Herald Slides keeps a deck of its own (slides with text boxes,
-  shapes and images, measured in points as PowerPoint measures them) and draws each slide with the
-  Canvas engine at the size it is shown. A 1920 by 1080 slide composites in about 18 ms and a
-  full-screen frame at the display's pixels in about 50 ms; text laid out at that size stays sharp,
-  a new deck draws 55 ms after it is asked for, and Canvas's image tools and on-device models apply
-  to slide pictures.
-- **Office files through converters of our own.** `.xlsx` through ExcelJS (MIT); `.docx` read with
-  JSZip (MIT) and our own WordprocessingML mapper and written with docx (MIT); `.pptx` read with
-  JSZip and our own DrawingML mapper and written with PptxGenJS (MIT); CSV, Markdown and plain
-  text as well. Headless LibreOffice, when it is installed, converts `.odt`, `.ods` and `.odp`.
-  Univer's editors write their "automatic" text colour into what is typed as a colour; Herald saves
-  it as no colour, so a file never gains a colour nobody chose.
+- **Herald Docs on TipTap 3 (MIT).** A document is TipTap's JSON with its page size, margins and
+  style looks on the document node. The editor, the converters, the print view and the document
+  API share that one schema, which builds without a window, so the API changes a live editor or a
+  file's JSON with the same code, one transaction and one step to undo. TipTap was chosen over
+  Univer Docs for native editing in the page (Chromium's spellcheck with suggestions on
+  right-click, input methods, and copy and paste with other apps), a schema usable without a
+  window, a far smaller bundle (the Docs window is a 0.53 MB chunk, 0.17 MB compressed, against
+  3.1 MB and 0.85 MB for Univer Docs), and the maintainer's good experience with a TipTap-based
+  editor. Only TipTap's open-source packages are used, at 3.31.4: none of its paid extensions or
+  cloud services.
+- **Word files through a reader of our own and the docx package.** A `.docx` (or a `.docm`,
+  without its macros) is read by Herald's own WordprocessingML reader through JSZip (MIT): styles
+  with their basedOn chains and the theme's fonts, run and paragraph formatting, lists from
+  numbering.xml, links, tables with merges and shading, inline and floating pictures, breaks and
+  the page. It is written with docx (MIT), with Title, Subtitle and headings as Word's own styles.
+  Both load only when a Word file is opened or saved (the writer is 0.45 MB). Markdown goes
+  through the GFM parser the app already had.
+- **What Univer Docs did better.** It paginates: text is laid out into pages, so the screen shows
+  where each page ends, and headers, footers and page numbers are part of its model. Herald Docs
+  draws one sheet of paper at the page's width and margins that grows with the text, keeps the
+  page breaks a document has, and leaves paging to Chromium when it prints; a file's headers and
+  footers are named in the fidelity report rather than kept.
+- **Herald Slides on a DOM slide editor of its own.** Univer Slides' open-source packages are a
+  skeleton with no Facade API: in 1.0.3 a new slide does not appear in the slide list, moving an
+  element does nothing, slide edits cannot be undone, and there is no present mode, layouts or
+  themes. The Herald Canvas engine of the first draft drew slides well but could not edit rich
+  text. Slides are drawn in the page instead, in points on a fixed 16:9 or 4:3 surface scaled to
+  fit, by one view for the editor, the slide list, presenting and PDF export, with text boxes and
+  shapes editing rich text through TipTap. Decks are written as `.pptx` with PptxGenJS (MIT) and a
+  finishing pass for what it cannot say, and read with JSZip and Herald's own DrawingML reader.
+  Herald's deck JSON goes into the file as a part of its own, with its content type and
+  relationship, so Herald reopens its files exactly while other apps pass over it; when the slides
+  have changed since Herald wrote them, Herald reads the slides instead.
 - **Never less than the file had, silently.** What a file holds that Herald cannot keep is listed
-  in a fidelity report, shown before the first save over that file. Main copies the original into
-  `office-backups` under the Herald OS data folder the first time Herald saves over it in a
-  session, with a cap on their size and age. Herald saves a document by itself only after the
-  person has saved it once.
-- **Licences.** Univer is Apache-2.0: NOTICE names it and a packaged build carries its license
-  text. Everything it brings in is MIT, Apache-2.0 or ISC. electron-builder would also copy
-  Univer's npm packages into `app.asar` (148 MB the renderer bundle already contains), so the build
-  leaves them out.
+  in a fidelity report, shown before the first save over that file: for a Word file, tracked
+  changes, comments, footnotes, headers and footers, text boxes, equations, fields, charts and
+  macros among others; for a workbook, what the package's parts hold that Sheets does not map.
+  Main copies the original into `office-backups` under the Herald OS data folder the first time
+  Herald saves over it in a session, with a cap on their size and age. Herald saves a document by
+  itself only after the person has saved it once, and stops when a save would lose something new.
+- **OpenDocument through LibreOffice, later.** Main can convert `.odt`, `.ods` and `.odp` with
+  headless LibreOffice when it is installed, but no window converts through it yet, so the three
+  formats stay off in the format table (`shared/office/files.ts`).
+- **Licences.** Univer is Apache-2.0: NOTICE names it and a packaged build carries its licence
+  text. electron-builder would also copy Univer's npm packages into `app.asar` (148 MB the renderer
+  bundle already contains), so the build leaves them out. TipTap, ProseMirror, ExcelJS, docx,
+  PptxGenJS and JSZip are MIT (JSZip, licensed MIT or GPL-3.0, is used under MIT). JSZip brings
+  pako, which is MIT and Zlib; the zlib licence is permissive, and Herald already ships pako with
+  Herald Canvas. Everything else they bring in is MIT, Apache-2.0, ISC or BSD: ExcelJS's old
+  unzipper is pinned to the 0.12 line and its uuid to 11.1.1, so npm audit finds nothing new.
 
 Alternatives considered:
 
@@ -487,7 +523,10 @@ Alternatives considered:
 - **Rejected: LibreOffice or Collabora Online as the editors.** Hundreds of megabytes per platform
   (Collabora also a server), and their own interface rather than Herald's. LibreOffice stays an
   optional converter.
-- **Rejected: Univer Slides for Herald Slides,** for the reasons above. To look at again once its
-  open-source edition can present and undo.
-- **Rejected: Univer's paid tier.** Its import and export, printing, charts and pivot tables are
-  closed and licensed per deployment; Herald writes the formats itself.
+- **Rejected: Univer Docs for Herald Docs** (the first draft), for the reasons above; its
+  pagination is what Herald Docs gives up.
+- **Rejected: Univer Slides or the Herald Canvas engine for Herald Slides,** for the reasons above.
+  Univer Slides is worth another look once its open-source edition can present and undo.
+- **Rejected: Univer's paid tier.** Its import and export, printing, charts, pivot tables and
+  collaboration are closed and licensed per deployment; Herald writes the formats and prints
+  itself.
