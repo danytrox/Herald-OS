@@ -55,6 +55,25 @@ async function unzip(bytes: Uint8Array) {
 
 const shapesOf = (slide: XmlElement): XmlElement[] => descendants(find(slide, 'p:cSld/p:spTree'), 'p:sp')
 
+/** A relationship's target as a part name, from the folder of the part it belongs to. */
+function partAt(folder: string, target: string): string {
+  if (target.startsWith('/')) {
+    return target.slice(1)
+  }
+
+  const names: string[] = []
+
+  for (const segment of `${folder}${target}`.split('/')) {
+    if (segment === '..') {
+      names.pop()
+    } else if (segment && segment !== '.') {
+      names.push(segment)
+    }
+  }
+
+  return names.join('/')
+}
+
 describe('writing PowerPoint files', () => {
   it('writes a slide for each slide, with the layouts it uses and real title placeholders', async () => {
     const { zip, read } = await unzip(await writePptx(sampleDeck()))
@@ -150,6 +169,44 @@ describe('writing PowerPoint files', () => {
     expect(copy.format).toBe('herald-slides')
     expect(JSON.stringify(copy.deck)).not.toContain('base64')
     expect(JSON.stringify(copy.deck)).toContain('part:/ppt/media/')
+  })
+
+  it('gives a content type to every part in the file and to no part that is not there', async () => {
+    const { zip, read } = await unzip(await writePptx(sampleDeck()))
+    const types = await read('[Content_Types].xml')
+    const defaults = new Set(descendants(types, 'Default').map((entry) => attr(entry, 'Extension')?.toLowerCase()))
+    const overrides = descendants(types, 'Override').map((entry) => attr(entry, 'PartName') ?? '')
+    const parts = Object.keys(zip.files).filter((name) => !zip.files[name].dir && name !== '[Content_Types].xml')
+
+    expect(overrides.filter((name) => !zip.file(name.slice(1)))).toEqual([])
+    expect(parts.filter((name) => !overrides.includes(`/${name}`) && !defaults.has(name.split('.').pop()?.toLowerCase()))).toEqual([])
+  })
+
+  it('points every relationship at a part in the file', async () => {
+    const { zip, read } = await unzip(await writePptx(sampleDeck()))
+    const missing: string[] = []
+    let checked = 0
+
+    for (const name of Object.keys(zip.files).filter((entry) => entry.endsWith('.rels'))) {
+      const folder = name.replace(/_rels\/[^/]*$/, '')
+
+      for (const relationship of descendants(await read(name), 'Relationship')) {
+        const target = attr(relationship, 'Target') ?? ''
+
+        if (attr(relationship, 'TargetMode') === 'External') {
+          continue
+        }
+
+        checked++
+
+        if (!zip.file(partAt(folder, target))) {
+          missing.push(`${name}: ${target}`)
+        }
+      }
+    }
+
+    expect(checked).toBeGreaterThan(20)
+    expect(missing).toEqual([])
   })
 
   it('reads its own files back exactly', async () => {

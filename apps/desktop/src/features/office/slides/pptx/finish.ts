@@ -375,4 +375,9 @@ export async function finishPresentation(zip: JSZip, deck: Deck, shrink?: Shrink
     const format = deck.size.width === SLIDE_SIZES.standard.width && deck.size.height === SLIDE_SIZES.standard.height ? 'On-screen Show (4:3)' : deck.size.width / deck.size.height === 16 / 9 ? 'On-screen Show (16:9)' : 'Custom'
     zip.file('docProps/app.xml', (await app.async('string')).replace(/<PresentationFormat>[^<]*<\/PresentationFormat>/, `<PresentationFormat>${format}</PresentationFormat>`))
   }
+
+  // PptxGenJS gives a content type to a slide master for every slide, though it writes only one.
+  await rewrite(zip, '[Content_Types].xml', (root) => {
+    root.children = root.children.filter((node) => typeof node === 'string' || node.name !== 'Override' || zip.file((node.attrs.PartName ?? '').slice(1)) !== null)
+  })
 }
