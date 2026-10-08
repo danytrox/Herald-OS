@@ -14,6 +14,7 @@ export function SheetsEditor({ doc }: { doc: OfficeDocument<WorkbookSnapshot> })
   useEffect(() => {
     let mounted: Mounted<SheetsEngine> | null = null
     let off = () => {}
+    let changedAt = -Infinity
     const start = (model: WorkbookSnapshot) => {
       mounted = mountIn(host.current!, (element) => createSheetsEngine(element, model, { worker: true }))
       const { engine } = mounted
@@ -24,7 +25,10 @@ export function SheetsEditor({ doc }: { doc: OfficeDocument<WorkbookSnapshot> })
         engine.api.getWorkbook(engine.unitId)?.setActiveSheet(active)
       }
 
-      off = engine.onChange(() => sheetsSession.changed(doc))
+      off = engine.onChange(() => {
+        changedAt = performance.now()
+        sheetsSession.changed(doc)
+      })
       setLiveEngine(doc.key, engine)
     }
     const stop = (later: boolean) => {
@@ -35,6 +39,13 @@ export function SheetsEditor({ doc }: { doc: OfficeDocument<WorkbookSnapshot> })
     }
     const handle: EditorHandle<WorkbookSnapshot> = {
       snapshot: () => ({ ...mounted!.engine.snapshot(), activeSheetId: mounted!.engine.position().sheetId }),
+      // Formula results come from the worker a moment after a change (about 150 ms on 50,000 cells); waiting
+      // when nothing changed would only hold the save up, as Univer gives a calculation half a second to start.
+      settle: async () => {
+        if (mounted && performance.now() - changedAt < 1000) {
+          await mounted.engine.api.getFormula().onCalculationResultApplied(5000).catch(() => {})
+        }
+      },
       load: (model) => {
         stop(false)
         start(model)
