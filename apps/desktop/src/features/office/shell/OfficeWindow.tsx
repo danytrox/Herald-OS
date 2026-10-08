@@ -9,6 +9,7 @@ import { keysLabel } from '../../../lib/shortcuts.ts'
 import type { AppIconId } from '../../../shell/apps.ts'
 import { messageOf } from '../../canvas/errors.ts'
 import { Menu, type MenuItemDef } from '../../files/Menu.tsx'
+import { bindOfficeRelay } from '../agent.ts'
 import type { OfficeSession } from '../session.ts'
 import type { OfficeDocument } from '../types.ts'
 import { type OfficeCommand, type OfficeMenu, runShortcut } from './commands.ts'
@@ -216,6 +217,7 @@ export function OfficeWindow<Model>({ session, menus, payload, start, noun, canO
     const element = root.current
     const focused = () => session.report(true)
     session.report(true)
+    bindOfficeRelay()
     element?.addEventListener('focusin', focused)
 
     return () => {
