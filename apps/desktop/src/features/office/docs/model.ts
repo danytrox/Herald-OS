@@ -724,6 +724,30 @@ export function insertImage(spec: ImageSpec, place: Place = 'end'): Op {
   }
 }
 
+export type ImageChange = Partial<Record<'alt' | 'title', string | null> & Record<'width' | 'height', number | null>>
+
+/** Change the picture at `pos`: its description, title or size. A selected picture stays selected. */
+export function setImageAttrs(pos: number, change: ImageChange): Op {
+  return (state) => {
+    const node = state.doc.nodeAt(pos)
+
+    if (node?.type.name !== 'image') {
+      return null
+    }
+
+    const tr = state.tr
+
+    // Attribute steps, because replacing the picture with a changed copy would drop its selection.
+    for (const [name, value] of Object.entries(change)) {
+      if (value !== undefined && node.attrs[name] !== value) {
+        tr.setNodeAttribute(pos, name, value)
+      }
+    }
+
+    return tr.docChanged ? tr : null
+  }
+}
+
 export interface ListSpec {
   items: string[]
   kind?: 'bullet' | 'ordered' | 'task'

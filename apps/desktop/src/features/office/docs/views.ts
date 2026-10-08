@@ -1,6 +1,7 @@
 import type { NodeViewRenderer } from '@tiptap/core'
 import { TableView } from '@tiptap/extension-table'
 import type { Node as PMNode } from '@tiptap/pm/model'
+import { applyLive, setImageAttrs } from './model.ts'
 
 /*
  * How the editor draws pictures and tables. A picture has corner handles that resize it with its
@@ -65,7 +66,7 @@ export const imageView: NodeViewRenderer = ({ node: initial, getPos, editor }) =
         const pos = getPos()
 
         if (typeof pos === 'number' && width !== startWidth) {
-          editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, width, height: Math.round(width * ratio) }))
+          applyLive(editor.view, setImageAttrs(pos, { width, height: Math.round(width * ratio) }))
         }
       }
 

@@ -165,7 +165,7 @@ function TableButton() {
 
   return (
     <div className="relative shrink-0">
-      <ToolButton label="Table" active={open} onClick={() => setOpen(!open)}>
+      <ToolButton label="Insert table" active={open} onClick={() => setOpen(!open)}>
         <IconTable />
       </ToolButton>
       {open && (

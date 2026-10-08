@@ -1,5 +1,5 @@
 import { history, undo, undoDepth } from '@tiptap/pm/history'
-import { EditorState, TextSelection, type Transaction } from '@tiptap/pm/state'
+import { EditorState, NodeSelection, TextSelection, type Transaction } from '@tiptap/pm/state'
 import { describe, expect, it } from 'vitest'
 import { documentFromMarkdown } from '../../../../shared/office/doc-text.ts'
 import { blankDocument, type DocJSON } from '../../../../shared/office/document.ts'
@@ -24,6 +24,7 @@ import {
   replaceText,
   sectionOf,
   setAlignment,
+  setImageAttrs,
   setLineSpacing,
   setMarks,
   setPage,
@@ -138,6 +139,25 @@ describe('inserting', () => {
       [false, 'Eggs']
     ])
     expect(run(state, insertList({ items: ['a'], kind: 'ordered', start: 4 })).doc.firstChild!.attrs.start).toBe(4)
+  })
+
+  it('changes a picture’s size and description, and a selected picture stays selected', () => {
+    const inserted = run(stateOf(blankDocument()), insertImage({ src: 'data:image/png;base64,AA==', width: 40, height: 20 }))
+    let pos = -1
+    inserted.doc.descendants((node, offset) => {
+      if (node.type.name === 'image') {
+        pos = offset
+      }
+    })
+    const selected = inserted.apply(inserted.tr.setSelection(NodeSelection.create(inserted.doc, pos)))
+    const changed = run(selected, setImageAttrs(pos, { width: 20, height: 10, alt: 'A dot' }))
+
+    expect(changed.doc.nodeAt(pos)!.attrs).toMatchObject({ width: 20, height: 10, alt: 'A dot' })
+    expect(changed.selection).toBeInstanceOf(NodeSelection)
+    expect(changed.selection.from).toBe(pos)
+    expect(setImageAttrs(pos, { width: 20 })(changed)).toBeNull()
+    expect(setImageAttrs(0, { width: 20 })(changed)).toBeNull()
+    expect(applyToJSON(jsonOf(changed.doc), setImageAttrs(pos, { alt: null }))?.content?.[0].content?.[0].attrs?.alt).toBeNull()
   })
 })
 

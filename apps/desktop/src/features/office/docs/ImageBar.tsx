@@ -5,6 +5,7 @@ import { useEditorState } from '@tiptap/react'
 import { useEffect, useState } from 'react'
 import { imageSize, parseDataUrl } from '../../../../shared/office/document.ts'
 import { textWidth } from './editor.ts'
+import { applyLive, type ImageChange, setImageAttrs } from './model.ts'
 import { anchorIn, clampLeft } from './overlay.ts'
 import { ToolButton } from './Toolbar.tsx'
 
@@ -28,13 +29,7 @@ export function ImageBar({ editor, frame, tick }: { editor: Editor; frame: HTMLE
     return null
   }
 
-  const setAttrs = (attrs: Record<string, unknown>) => {
-    const node = editor.state.doc.nodeAt(picture.pos)
-
-    if (node?.type.name === 'image') {
-      editor.view.dispatch(editor.state.tr.setNodeMarkup(picture.pos, undefined, { ...node.attrs, ...attrs }))
-    }
-  }
+  const setAttrs = (change: ImageChange) => applyLive(editor.view, setImageAttrs(picture.pos, change))
 
   const resetSize = () => {
     const data = parseDataUrl(picture.src)
