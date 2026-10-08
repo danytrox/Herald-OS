@@ -21,12 +21,15 @@ import {
   SLIDE_SIZES,
   SLOTS,
   type Stroke,
+  type TableCell,
+  type TableElement,
   type TextBody,
   type TextRun,
   type Theme,
   TRANSITIONS
 } from './deck.ts'
 import { PROMPTS } from './layouts.ts'
+import { MAX_COLUMNS, MAX_ROWS, ROW_HEIGHT, settleSpans } from './tables.ts'
 import { colorOf, DEFAULT_THEME, normalHex } from './themes.ts'
 import { DEFAULT_INSET, MAX_LEVEL } from './text.ts'
 
@@ -199,6 +202,42 @@ function placeholder(value: unknown): Placeholder | undefined {
   return { role, prompt: str(value.prompt, PROMPTS[role], 200) || PROMPTS[role] }
 }
 
+function cell(value: unknown): TableCell {
+  const raw = isObject(value) ? value : {}
+  const across = Math.round(num(raw.colSpan, 1, 1, MAX_COLUMNS))
+  const down = Math.round(num(raw.rowSpan, 1, 1, MAX_ROWS))
+
+  return { body: body(raw.body), fill: fill(raw.fill), ...(across > 1 ? { colSpan: across } : {}), ...(down > 1 ? { rowSpan: down } : {}) }
+}
+
+/** A table whole: a cell for every row and column, merged cells that fit, its size its columns' and rows'; never rotated, flipped or a placeholder. */
+function table(value: Raw, frame: Pick<TableElement, 'id' | 'x' | 'y' | 'name'>): TableElement | null {
+  const columns = list(value.columns, MAX_COLUMNS).map((width) => num(width, 72, 1, 100_000))
+  const rows = list(value.rows, MAX_ROWS).map((height) => num(height, ROW_HEIGHT, 1, 100_000))
+
+  if (!columns.length || !rows.length) {
+    return null
+  }
+
+  const raw = list(value.cells, MAX_ROWS)
+  const cells = rows.map((_, r) => columns.map((_, c) => cell(list(raw[r], MAX_COLUMNS)[c])))
+
+  return {
+    id: frame.id,
+    kind: 'table',
+    x: frame.x,
+    y: frame.y,
+    width: columns.reduce((sum, width) => sum + width, 0),
+    height: rows.reduce((sum, height) => sum + height, 0),
+    rotation: 0,
+    ...(frame.name ? { name: frame.name } : {}),
+    columns,
+    rows,
+    cells: settleSpans(cells, columns.length),
+    stroke: stroke(value.stroke)
+  }
+}
+
 function element(value: unknown): SlideElement | null {
   if (!isObject(value)) {
     return null
@@ -245,6 +284,8 @@ function element(value: unknown): SlideElement | null {
     }
     case 'line':
       return { ...frame, kind: 'line', stroke: stroke(value.stroke) ?? { color: 'tx1', width: 2, dash: 'solid' }, start: oneOf(value.start, ARROW_HEADS, 'none'), end: oneOf(value.end, ARROW_HEADS, 'none') }
+    case 'table':
+      return table(value, frame)
     default:
       return null
   }

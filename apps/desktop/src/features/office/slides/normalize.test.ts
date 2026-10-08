@@ -57,6 +57,45 @@ describe('normalizeDeck', () => {
     expect(new Set(deck.slides.map((slide) => slide.id)).size).toBe(2)
   })
 
+  it('makes a table whole: a cell for every row and column, merged cells that fit, never rotated', () => {
+    const deck = normalizeDeck({
+      slides: [
+        {
+          elements: [
+            {
+              id: 't',
+              kind: 'table',
+              x: 10,
+              y: 20,
+              width: 1,
+              height: 1,
+              rotation: 45,
+              flipH: true,
+              placeholder: { role: 'body' },
+              columns: [100, 'wide', 50],
+              rows: [30, 30],
+              cells: [[{ body: { paragraphs: [{ runs: [{ text: 'Name' }] }] }, fill: { color: 'accent1' }, colSpan: 7, rowSpan: 2 }], 'nonsense'],
+              stroke: { color: 'bg1', width: 1 }
+            },
+            { id: 'u', kind: 'table', columns: [], rows: [10] }
+          ]
+        }
+      ]
+    })
+    const elements = deck.slides[0].elements
+    const table = elements[0]
+
+    expect(elements).toHaveLength(1)
+    expect(table).toMatchObject({ kind: 'table', x: 10, y: 20, width: 222, height: 60, rotation: 0, columns: [100, 72, 50], rows: [30, 30], stroke: { color: 'bg1', width: 1, dash: 'solid' } })
+    expect(table).not.toHaveProperty('flipH')
+    expect(table).not.toHaveProperty('placeholder')
+    expect(table.kind === 'table' && table.cells.map((row) => row.map((cell) => (cell.merged ? '·' : `${cell.colSpan ?? 1}x${cell.rowSpan ?? 1}`)))).toEqual([
+      ['3x2', '·', '·'],
+      ['·', '·', '·']
+    ])
+    expect(table.kind === 'table' && table.cells[1][2].body.paragraphs).toEqual([{ runs: [{ text: '' }] }])
+  })
+
   it('takes only image data as a picture', () => {
     expect(imageSource(PNG)).toBe(PNG)
     expect(imageSource('data:text/html;base64,PGgxPg==')).toBe('')

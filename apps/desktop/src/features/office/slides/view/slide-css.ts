@@ -15,6 +15,10 @@ export const SLIDE_CSS = `
 .hs-text[data-anchor="bottom"] { justify-content: flex-end; }
 .hs-flow { white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; outline: none; font-variant-ligatures: none; font-feature-settings: "liga" 0; font-kerning: normal; }
 .hs-flow[data-wrap="false"] { white-space: pre; }
+.hs-table { position: absolute; left: 0; top: 0; display: grid; }
+.hs-cell { position: relative; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; min-width: 0; }
+.hs-cell[data-anchor="middle"] { justify-content: center; }
+.hs-cell[data-anchor="bottom"] { justify-content: flex-end; }
 .hs-p { margin: 0; padding: 0; min-height: 0; }
 .hs-p[data-marker]::before { content: attr(data-marker); display: inline-block; text-indent: 0; width: var(--hs-hang, auto); padding-right: var(--hs-gap, 0); box-sizing: border-box; white-space: nowrap; color: var(--hs-marker-color, inherit); font-size: var(--hs-marker-size, inherit); font-family: var(--hs-marker-font, inherit); font-weight: normal; font-style: normal; text-decoration: none; }
 .hs-prompt { opacity: 0.45; }

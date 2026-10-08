@@ -1,7 +1,8 @@
-import type { ArrowHead, Background, Box, Color, Deck, Fill, LayoutId, ListKind, ShapeKind, Slide, SlideElement, SlideSize, Stroke, TextAlign, Theme, Transition } from './deck.ts'
+import type { ArrowHead, Background, Box, Color, Deck, Fill, LayoutId, ListKind, ShapeKind, Slide, SlideElement, SlideSize, Stroke, TableElement, TextAlign, Theme, Transition } from './deck.ts'
 import { findElement, findSlide, newId, SLIDE_SIZES, withElements, withSlide } from './deck.ts'
 import { boundsOf, boundsOfAll, copyElement, coverCrop, DEFAULT_LINE, imageElement, keepOnSlide, lineElement, moveElement, type Point, shapeElement, textElement, withBox } from './elements.ts'
 import { changeLayout, isEmptyPlaceholder, LAYOUT_NAMES, newSlide, placeholderFor } from './layouts.ts'
+import { type CellRef, cellUnder, fillCells, insertColumn, insertRow, MAX_COLUMNS, MAX_ROWS, removeColumns, removeRows, ROW_HEIGHT, tableElement, withCell } from './tables.ts'
 import { DEFAULT_THEME, themeById } from './themes.ts'
 import { MAX_LEVEL, plainText, textBody } from './text.ts'
 
@@ -335,6 +336,83 @@ export function addLine(deck: Deck, slideId: string, options: { from: Point; to:
 
   return { ...change, elementId: element.id }
 }
+
+export interface TableOptions {
+  rows: number
+  columns: number
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  /** Text for the cells, row by row. */
+  cells?: readonly (readonly string[])[]
+}
+
+/** A table in PowerPoint's default style, three quarters of the slide wide with rows for 18 point text, in the middle unless placed. */
+export function addTable(deck: Deck, slideId: string, options: TableOptions): DeckChange & { elementId: string } {
+  const rows = Math.max(1, Math.min(MAX_ROWS, Math.round(options.rows) || 1))
+  const columns = Math.max(1, Math.min(MAX_COLUMNS, Math.round(options.columns) || 1))
+  const box = { ...middle(deck, options.width ?? deck.size.width * 0.75, options.height ?? rows * ROW_HEIGHT), ...(options.x !== undefined ? { x: options.x } : {}), ...(options.y !== undefined ? { y: options.y } : {}) }
+  const element = tableElement(box, rows, columns, options.cells)
+  const change = insertElements(deck, slideId, [element], 'New Table')
+
+  return { ...change, elementId: element.id }
+}
+
+/** A table of a slide, or an error saying it is not there. */
+export function requireTable(deck: Deck, slideId: string, tableId: string): TableElement {
+  const element = requireElement(deck, slideId, tableId)
+
+  if (element.kind !== 'table') {
+    throw new Error(`Element ${tableId} is not a table`)
+  }
+
+  return element
+}
+
+/** A table changed as one step; a table left with no rows or columns goes. */
+function changeTable(deck: Deck, slideId: string, tableId: string, label: string, change: (table: TableElement) => TableElement | null): DeckChange {
+  const table = requireTable(deck, slideId, tableId)
+  const next = change(table)
+
+  if (next === table) {
+    return unchanged(deck, label)
+  }
+
+  if (!next) {
+    return { ...removeElements(deck, slideId, [tableId]), label: 'Delete Table' }
+  }
+
+  return { deck: withElements(deck, slideId, new Set([tableId]), () => next), label, focus: { slideId, selected: [tableId] } }
+}
+
+/** A cell's text (rows and columns count from 0), a paragraph a line with the cell's first paragraph's settings; a covered cell's goes to the merged cell over it. */
+export function setCellText(deck: Deck, slideId: string, tableId: string, row: number, column: number, text: string): DeckChange {
+  return changeTable(deck, slideId, tableId, 'Cell Text', (table) => {
+    if (!table.cells[row]?.[column]) {
+      throw new Error(`There is no cell at row ${row + 1}, column ${column + 1}; the table has ${table.rows.length} rows and ${table.columns.length} columns`)
+    }
+
+    return withCell(table, cellUnder(table, { row, column }), (cell) => {
+      const first = cell.body.paragraphs[0]
+
+      return { ...cell, body: { ...cell.body, paragraphs: text.split('\n').map((line) => ({ ...first, runs: [{ ...first?.runs[0], text: line }] })) } }
+    })
+  })
+}
+
+export const insertTableRow = (deck: Deck, slideId: string, tableId: string, row: number, where: 'above' | 'below' = 'below'): DeckChange => changeTable(deck, slideId, tableId, 'Insert Row', (table) => insertRow(table, row, where))
+
+export const insertTableColumn = (deck: Deck, slideId: string, tableId: string, column: number, where: 'left' | 'right' = 'right'): DeckChange =>
+  changeTable(deck, slideId, tableId, 'Insert Column', (table) => insertColumn(table, column, where))
+
+export const removeTableRows = (deck: Deck, slideId: string, tableId: string, rows: readonly number[]): DeckChange => changeTable(deck, slideId, tableId, rows.length > 1 ? 'Delete Rows' : 'Delete Row', (table) => removeRows(table, rows))
+
+export const removeTableColumns = (deck: Deck, slideId: string, tableId: string, columns: readonly number[]): DeckChange =>
+  changeTable(deck, slideId, tableId, columns.length > 1 ? 'Delete Columns' : 'Delete Column', (table) => removeColumns(table, columns))
+
+/** A fill for some cells of a table, or all of them; null for none. */
+export const setCellFill = (deck: Deck, slideId: string, tableId: string, cells: readonly CellRef[] | 'all', fill: Fill | null): DeckChange => changeTable(deck, slideId, tableId, 'Cell Fill', (table) => fillCells(table, cells, fill))
 
 /** Some elements changed alike, as one step called `label`. */
 export function updateElements(deck: Deck, slideId: string, ids: readonly string[], change: (element: SlideElement) => SlideElement, label: string): DeckChange {

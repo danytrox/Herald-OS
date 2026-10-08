@@ -1,10 +1,10 @@
 /*
- * Herald Slides' deck: slides holding text boxes, shapes, lines and pictures on a page measured in
- * points, as PowerPoint measures its slides (16:9 is 960 by 540, 4:3 is 720 by 540), so every
- * position is a whole number of EMU (12,700 a point) in a PowerPoint file. A deck is plain data,
- * replaced on every change, so undo is a step back to an earlier deck. Colours either name one of
- * the theme's slots or are literal, and fonts either name the theme's heading or body font or a
- * family: a new theme repaints whatever names a slot or a theme font, and leaves the rest alone.
+ * Herald Slides' deck: slides holding text boxes, shapes, lines, pictures and tables on a page
+ * measured in points, as PowerPoint measures its slides (16:9 is 960 by 540, 4:3 is 720 by 540), so
+ * every position is a whole number of EMU (12,700 a point) in a PowerPoint file. A deck is plain
+ * data, replaced on every change, so undo is a step back to an earlier deck. Colours either name
+ * one of the theme's slots or are literal, and fonts either name the theme's heading or body font
+ * or a family: a new theme repaints whatever names a slot or a theme font, and leaves the rest alone.
  */
 
 export const EMU_PER_POINT = 12700
@@ -224,7 +224,33 @@ export interface LineElement extends Frame {
   end: ArrowHead
 }
 
-export type SlideElement = TextElement | ShapeElement | ImageElement | LineElement
+export interface TableCell {
+  body: TextBody
+  fill: Fill | null
+  /** How many columns and rows a merged cell reaches across from its top left (1 when absent). */
+  colSpan?: number
+  rowSpan?: number
+  /** Covered by a merged cell: not drawn, and its text kept only for the file. */
+  merged?: boolean
+}
+
+/**
+ * Rows of cells, a cell for every column, as PowerPoint's tables have them: a merged cell starts at
+ * its top left and the cells it covers stay in the grid, marked. A row is at least as tall as its
+ * height and grows with its text. Tables neither rotate nor flip, as in PowerPoint.
+ */
+export interface TableElement extends Frame {
+  kind: 'table'
+  /** Column widths in points, adding up to the width. */
+  columns: number[]
+  /** Row heights in points, adding up to the height. */
+  rows: number[]
+  cells: TableCell[][]
+  /** The lines around and between the cells. */
+  stroke: Stroke | null
+}
+
+export type SlideElement = TextElement | ShapeElement | ImageElement | LineElement | TableElement
 
 export type ElementKind = SlideElement['kind']
 

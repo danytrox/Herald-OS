@@ -1,9 +1,10 @@
 import { IconPhoto } from '@tabler/icons-react'
 import { type CSSProperties, memo, type ReactNode, useLayoutEffect, useRef } from 'react'
-import type { Background, Box, Deck, ImageElement, LineElement, ShapeElement, Slide, SlideElement, TextBody, TextElement, Theme } from '../deck.ts'
+import type { Background, Box, Deck, ImageElement, LineElement, ShapeElement, Slide, SlideElement, TableElement, TextBody, TextElement, Theme } from '../deck.ts'
 import { lineEnds } from '../elements.ts'
 import { isEmptyPlaceholder } from '../layouts.ts'
 import { arrowHead, dashArray, shapePath, textArea } from '../shapes.ts'
+import type { CellRef } from '../tables.ts'
 import { cssColor, resolveColor } from '../themes.ts'
 import { effectiveStyle, isBlank, listMarkers } from '../text.ts'
 import { fitText, shrinkFactors } from './fit.ts'
@@ -18,9 +19,10 @@ import { flowCss, paragraphCss, runCss } from './text-style.ts'
 
 export type ViewMode = 'edit' | 'thumb' | 'present' | 'print'
 
-/** The text editor, drawn in place of one element's text. */
+/** The text editor, drawn in place of one element's text (one cell's, in a table). */
 export interface EditingSlot {
   id: string
+  cell?: CellRef | null
   render: (body: TextBody) => ReactNode
 }
 
@@ -182,7 +184,67 @@ function LineView({ element, theme, mode }: { element: LineElement; theme: Theme
   )
 }
 
-export function ElementView({ element, theme, mode, hidden, editor }: { element: SlideElement; theme: Theme; mode: ViewMode; hidden?: boolean; editor?: EditingSlot['render'] }) {
+const DASH_STYLES = { solid: 'solid', dash: 'dashed', dot: 'dotted', dashDot: 'dashed', longDash: 'dashed' } as const
+
+/**
+ * A table as a grid: each row at least its height and as tall as its text, each cell filled and
+ * padded by its insets with its text placed as its anchor says. The lines are outlines centred on
+ * the cells' edges, so neighbours share one line and the text does not move for them.
+ */
+function TableView({ table, theme, editor, cell: editing }: { table: TableElement; theme: Theme; editor?: EditingSlot['render']; cell?: CellRef | null }) {
+  const across = table.columns.reduce((sum, width) => sum + width, 0) || 1
+  const down = table.rows.reduce((sum, height) => sum + height, 0) || 1
+  const { stroke } = table
+  const line: CSSProperties = stroke && stroke.width > 0 ? { outline: `${stroke.width}px ${DASH_STYLES[stroke.dash]} ${cssColor(stroke.color, theme, stroke.alpha)}`, outlineOffset: -stroke.width / 2 } : {}
+
+  return (
+    <div
+      className="hs-table"
+      style={{
+        gridTemplateColumns: table.columns.map((width) => `${(width / across) * table.width}px`).join(' '),
+        gridTemplateRows: table.rows.map((height) => `minmax(${(height / down) * table.height}px, auto)`).join(' ')
+      }}
+    >
+      {table.cells.flatMap((row, r) =>
+        row.map((cell, c) => {
+          if (cell.merged) {
+            return null
+          }
+
+          const [left, top, right, bottom] = cell.body.inset
+          const typing = editor && editing?.row === r && editing.column === c
+
+          return (
+            <div
+              key={`${r}:${c}`}
+              className="hs-cell"
+              data-row={r}
+              data-column={c}
+              data-anchor={cell.body.anchor}
+              style={{
+                gridRow: `${r + 1} / span ${cell.rowSpan ?? 1}`,
+                gridColumn: `${c + 1} / span ${cell.colSpan ?? 1}`,
+                padding: `${top}px ${right}px ${bottom}px ${left}px`,
+                backgroundColor: cell.fill ? cssColor(cell.fill.color, theme, cell.fill.alpha) : undefined,
+                ...line
+              }}
+            >
+              {typing ? (
+                editor(cell.body)
+              ) : (
+                <div className="hs-flow" style={flowCss(cell.body, theme) as CSSProperties}>
+                  <Paragraphs body={cell.body} theme={theme} />
+                </div>
+              )}
+            </div>
+          )
+        })
+      )}
+    </div>
+  )
+}
+
+export function ElementView({ element, theme, mode, hidden, editor, cell }: { element: SlideElement; theme: Theme; mode: ViewMode; hidden?: boolean; editor?: EditingSlot['render']; cell?: CellRef | null }) {
   const style: CSSProperties = {
     left: element.x,
     top: element.y,
@@ -214,6 +276,8 @@ export function ElementView({ element, theme, mode, hidden, editor }: { element:
     )
   } else if (element.kind === 'image') {
     content = <PictureView element={element} theme={theme} mode={mode} />
+  } else if (element.kind === 'table') {
+    content = <TableView table={element} theme={theme} editor={editor} cell={cell} />
   } else {
     content = <LineView element={element} theme={theme} mode={mode} />
   }
@@ -248,7 +312,7 @@ export const SlideView = memo(function SlideView({ deck, slide, scale, mode, hid
     <div className={className} style={{ position: 'relative', overflow: 'hidden', width: width * scale, height: height * scale, ...style }} data-slide-id={slide.id}>
       <div className="hs-slide" style={{ width, height, transform: `scale(${scale})`, ...backgroundCss(slide.background, deck.theme) }}>
         {slide.elements.map((element) => (
-          <ElementView key={element.id} element={element} theme={deck.theme} mode={mode} hidden={hide?.has(element.id)} editor={editing?.id === element.id ? editing.render : undefined} />
+          <ElementView key={element.id} element={element} theme={deck.theme} mode={mode} hidden={hide?.has(element.id)} editor={editing?.id === element.id ? editing.render : undefined} cell={editing?.id === element.id ? editing.cell : undefined} />
         ))}
         {children}
       </div>

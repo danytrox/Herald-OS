@@ -1,5 +1,6 @@
 import type { ArrowHead, Box, ImageElement, LineElement, ShapeElement, ShapeKind, SlideElement, SlideSize, Stroke, TextBody, TextElement } from './deck.ts'
 import { MIN_SIDE, newId } from './deck.ts'
+import { scaleTable } from './tables.ts'
 import { textBody } from './text.ts'
 
 /*
@@ -103,11 +104,17 @@ export const boundsOfAll = (elements: readonly SlideElement[]): Box | null => (e
 
 export const moveElement = <T extends SlideElement>(element: T, dx: number, dy: number): T => ({ ...element, x: element.x + dx, y: element.y + dy })
 
-/** An element given a new box (rotation and flips kept); boxes keep at least MIN_SIDE except a line's. */
+/** An element given a new box (rotation and flips kept, a table's columns and rows in proportion); boxes keep at least MIN_SIDE except a line's. */
 export function withBox<T extends SlideElement>(element: T, box: Box): T {
   const least = element.kind === 'line' ? 0 : MIN_SIDE
+  const width = Math.max(least, box.width)
+  const height = Math.max(least, box.height)
 
-  return { ...element, x: box.x, y: box.y, width: Math.max(least, box.width), height: Math.max(least, box.height) }
+  if (element.kind === 'table') {
+    return scaleTable({ ...element, x: box.x, y: box.y }, width, height) as T
+  }
+
+  return { ...element, x: box.x, y: box.y, width, height }
 }
 
 /** An element kept at least partly on its slide. */
@@ -149,5 +156,5 @@ export function describeElement(element: SlideElement): string {
     return { title: 'Title', subtitle: 'Subtitle', body: 'Text', heading: 'Heading', caption: 'Caption', picture: 'Picture' }[element.placeholder.role]
   }
 
-  return element.kind === 'text' ? 'Text box' : element.kind === 'image' ? 'Picture' : element.kind === 'line' ? 'Line' : 'Shape'
+  return element.kind === 'text' ? 'Text box' : element.kind === 'image' ? 'Picture' : element.kind === 'line' ? 'Line' : element.kind === 'table' ? 'Table' : 'Shape'
 }
