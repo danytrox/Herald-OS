@@ -63,4 +63,40 @@ describe('what an open and save keeps exactly', () => {
     expect(used).toEqual(expect.arrayContaining(['14', '22']))
     expect(styles).not.toContain('formatCode="m/d/yyyy')
   })
+
+  it('keeps text that reads like an error as text, and every error value as an error', async () => {
+    const errors = ['#N/A', '#FIELD!', '#SPILL!', '#BLOCKED!', '#PYTHON!']
+    const { written, second } = await roundTrip(await bookWith([['A1', '#N/A'], ...errors.map((error, row): [string, ExcelJS.CellValue] => [`A${row + 2}`, { error } as ExcelJS.CellErrorValue])]))
+    const sheet = await partOf(written.bytes, 'xl/worksheets/sheet1.xml')
+    const typeOf = (address: string) => sheet.match(new RegExp(`<c r="${address}"([^>]*)>`))?.[1].match(/ t="(\w+)"/)?.[1]
+
+    expect(typeOf('A1')).toBe('s')
+    expect(errors.map((_, row) => typeOf(`A${row + 2}`))).toEqual(errors.map(() => 'e'))
+    expect(columnA(second.workbook, 6)).toEqual(['#N/A', ...errors])
+  })
+
+  it('keeps formulas whose functions Excel prefixes, even ones Herald has no name for', async () => {
+    const formulas = ['SUM(_xlfn.ANCHORARRAY(B1))', 'IFERROR(_xlfn.XLOOKUP(B1,B2:B3,C2:C3),"")', '_xlfn.SINGLE(B1:B3)', '_xlfn.ENCODEURL("a b")', '_xlfn.SOMEDAY(B1)', '_xludf.MYADDIN(B1)', 'SUM(_xlfn._xlws.SORT(B1:B3))']
+    const { first, written } = await roundTrip(await bookWith(formulas.map((formula, row): [string, ExcelJS.CellValue] => [`A${row + 1}`, { formula, result: 1 }])))
+    const sheet = await partOf(written.bytes, 'xl/worksheets/sheet1.xml')
+
+    expect([...sheet.matchAll(/<f>([^<]*)<\/f>/g)].map((match) => match[1].replace(/&quot;/g, '"'))).toEqual(formulas)
+    expect(cellsOf(first.workbook)[0][0].f).toBe('=SUM(ANCHORARRAY(B1))')
+    expect(cellsOf(first.workbook)[4][0].f).toBe('=_xlfn.SOMEDAY(B1)')
+  })
+
+  it('keeps control characters, carriage returns and text that reads like an escape', async () => {
+    const { first, second } = await roundTrip(await bookWith([['A1', 'ctl_x0001_end'], ['A2', 'line1_x000D_\nline2'], ['A3', '_x005F_x0041_ stays'], ['A4', 'tab\tstays']]))
+    const expected = ['ctl\u0001end', 'line1\r\nline2', '_x0041_ stays', 'tab\tstays']
+
+    expect(columnA(first.workbook, 4)).toEqual(expected)
+    expect(columnA(second.workbook, 4)).toEqual(expected)
+  })
+
+  it('writes a line break that rich text has as CR LF as one line break', async () => {
+    const rich = { richText: [{ text: 'bold_x000D_\n', font: { bold: true } }, { text: 'rest' }] } as ExcelJS.CellRichTextValue
+    const { second } = await roundTrip(await bookWith([['A1', rich]]))
+
+    expect(cellsOf(second.workbook)[0][0].v).toBe('bold\nrest')
+  })
 })

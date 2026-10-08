@@ -19,12 +19,15 @@ const NEWER = new Set(
     'NUMBERVALUE PDURATION PERCENTILE.EXC PERCENTILE.INC PERCENTOF PERCENTRANK.EXC PERCENTRANK.INC PERMUTATIONA PHI PIVOTBY POISSON.DIST QUARTILE.EXC QUARTILE.INC ' +
     'RANDARRAY RANK.AVG RANK.EQ REDUCE REGEXEXTRACT REGEXREPLACE REGEXTEST RRI SCAN SEC SECH SEQUENCE SHEET SHEETS SKEW.P SORTBY STDEV.P STDEV.S STOCKHISTORY SWITCH ' +
     'T.DIST T.DIST.2T T.DIST.RT T.INV T.INV.2T T.TEST TAKE TEXTAFTER TEXTBEFORE TEXTJOIN TEXTSPLIT TOCOL TOROW TRIMRANGE UNICHAR UNICODE UNIQUE VALUETOTEXT VAR.P ' +
-    'VAR.S VSTACK WEBSERVICE WEIBULL.DIST WORKDAY.INTL WRAPCOLS WRAPROWS XLOOKUP XMATCH XOR Z.TEST'
+    'VAR.S VSTACK WEBSERVICE WEIBULL.DIST WORKDAY.INTL WRAPCOLS WRAPROWS XLOOKUP XMATCH XOR Z.TEST ANCHORARRAY ENCODEURL ISO.CEILING SINGLE'
   ).split(' ')
 )
 
 /** Newer still: these carry `_xlfn._xlws.`. */
 const WORKSHEET_ONLY = new Set(['FILTER', 'SORT'])
+
+/** The error values a cell can hold in a file, the newer ones included. */
+export const ERROR_VALUES = new Set(['#NULL!', '#DIV/0!', '#VALUE!', '#REF!', '#NAME?', '#NUM!', '#N/A', '#GETTING_DATA', '#SPILL!', '#CALC!', '#FIELD!', '#BLOCKED!', '#CONNECT!', '#BUSY!', '#UNKNOWN!', '#PYTHON!', '#EXTERNAL!'])
 
 const opensLiteral = (char: string | undefined): boolean => char === '"' || char === "'" || char === '['
 
@@ -76,9 +79,11 @@ function outsideLiterals(formula: string, change: (part: string) => string): str
   return out + change(plain)
 }
 
-/** Excel's text for a formula as Univer keeps it: prefixes gone, an "=" in front. */
+/** Excel's text for a formula as Univer keeps it: prefixes gone, an "=" in front. A prefix is kept on a name it could not be given back to. */
 export function formulaFromExcel(text: string): string {
-  const bare = outsideLiterals(text.replace(/^=/, ''), (part) => part.replace(/_xl(?:fn|ws|pm|udf)\./gi, ''))
+  const bare = outsideLiterals(text.replace(/^=/, ''), (part) =>
+    part.replace(/_xlpm\./gi, '').replace(/_xlfn\.(?:_xlws\.)?([A-Za-z][A-Za-z0-9.]*)(?=\s*\()/gi, (whole, name: string) => (NEWER.has(name.toUpperCase()) || WORKSHEET_ONLY.has(name.toUpperCase()) ? name : whole))
+  )
 
   return `=${bare}`
 }
@@ -176,14 +181,14 @@ export function formulaToExcel(formula: string, unitId?: string): string {
   const plain = /\b(LET|LAMBDA)\s*\(/i.test(bare) ? withParameterPrefixes(bare) : bare
 
   return outsideLiterals(plain, (part) =>
-    part.replace(/(^|[^A-Za-z0-9_.])([A-Za-z][A-Za-z0-9.]*)(\s*\()/g, (whole, before: string, name: string, open: string) => {
+    part.replace(/(^|[^A-Za-z0-9_.])([A-Za-z][A-Za-z0-9.]*)(?=\s*\()/g, (whole, before: string, name: string) => {
       const upper = name.toUpperCase()
 
       if (WORKSHEET_ONLY.has(upper)) {
-        return `${before}_xlfn._xlws.${name}${open}`
+        return `${before}_xlfn._xlws.${name}`
       }
 
-      return NEWER.has(upper) ? `${before}_xlfn.${name}${open}` : whole
+      return NEWER.has(upper) ? `${before}_xlfn.${name}` : whole
     })
   )
 }

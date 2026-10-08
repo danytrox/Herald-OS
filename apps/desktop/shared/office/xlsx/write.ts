@@ -3,7 +3,7 @@ import JSZip from 'jszip'
 import { CELL_TYPE, type CellSnapshot, cellsOf, type SheetSnapshot, type WorkbookSnapshot } from '../workbook.ts'
 import { cellName, rangeName } from './address.ts'
 import { argbOf } from './colors.ts'
-import { formulaToExcel, slideFormula } from './formula.ts'
+import { ERROR_VALUES, formulaToExcel, slideFormula } from './formula.ts'
 import type { SheetExtras } from './read.ts'
 import { conditionalToExcel, definedNamesXml, fileLinkTarget, filterXml, linksXml, readResource, RESOURCES, type SheetLink, type UAutoFilter, type UConditionalRule, type UDefinedName, type UValidation, validationsXml } from './rules.ts'
 import { type BaseFont, composeStyles, differentDiagonals, excelFont, excelStyle, type UStyle } from './styles.ts'
@@ -26,7 +26,9 @@ export interface XlsxWriteResult {
 /** Univer's own default font, for a workbook made in Herald without a Normal font of its own. */
 export const UNIVER_BASE: BaseFont = { name: 'Arial', size: 11, color: null }
 
-const ERRORS = new Set(['#NULL!', '#DIV/0!', '#VALUE!', '#REF!', '#NAME?', '#NUM!', '#N/A', '#SPILL!', '#CALC!', '#GETTING_DATA'])
+/** Text as a file holds it: control characters as `_xHHHH_`, and text that reads like such an escape escaped itself, so Excel reads back what was written. */
+const escaped = (text: string): string =>
+  text.replace(/_(x[0-9A-Fa-f]{4}_)/g, '_x005F_$1').replace(/[\x00-\x08\x0B-\x1F\uFFFE\uFFFF]/g, (char) => `_x${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}_`)
 
 /** Sheet names a file can hold: at most 31 characters, none of [ ] : * ? / \, no quote at either end, each its own. */
 export function excelSheetNames(names: string[]): string[] {
@@ -74,7 +76,7 @@ function valueFor(cell: CellSnapshot): ExcelJS.CellValue {
 
   const text = String(value)
 
-  return ERRORS.has(text) ? ({ error: text } as ExcelJS.CellErrorValue) : text
+  return ERROR_VALUES.has(text) && cell.t !== CELL_TYPE.text ? ({ error: text } as ExcelJS.CellErrorValue) : text
 }
 
 interface Body {
@@ -91,7 +93,9 @@ function richTextOf(cell: CellSnapshot, base: BaseFont, cellStyle: UStyle): { te
     return null
   }
 
-  const text = body.dataStream.replace(/\r?\n$/, '').replace(/\r$/, '').replace(/\r/g, '\n')
+  const stream = body.dataStream.replace(/\r?\n$/, '').replace(/\r$/, '')
+  // A break the file wrote as CR LF is one line break, and any other CR ends one of Univer's paragraphs: a line break too.
+  const piece = (from: number, to?: number) => escaped(stream.slice(from, to).replace(/\r\n?/g, '\n'))
   const runs: ExcelJS.RichText[] = []
   let at = 0
 
@@ -99,22 +103,22 @@ function richTextOf(cell: CellSnapshot, base: BaseFont, cellStyle: UStyle): { te
     const start = Math.max(at, run.st)
 
     if (start > at) {
-      runs.push({ text: text.slice(at, start), font: excelFont(cellStyle, base) })
+      runs.push({ text: piece(at, start), font: excelFont(cellStyle, base) })
     }
 
     if (run.ed > start) {
-      runs.push({ text: text.slice(start, run.ed), font: excelFont(composeStyles(cellStyle, run.ts), base) })
+      runs.push({ text: piece(start, run.ed), font: excelFont(composeStyles(cellStyle, run.ts), base) })
       at = run.ed
     }
   }
 
-  if (runs.length && at < text.length) {
-    runs.push({ text: text.slice(at), font: excelFont(cellStyle, base) })
+  if (runs.length && at < stream.length) {
+    runs.push({ text: piece(at), font: excelFont(cellStyle, base) })
   }
 
   const range = body.customRanges?.find((entry) => entry.rangeType === 0 && entry.properties?.url)
 
-  return { text, runs: runs.length ? runs : null, link: range ? { url: range.properties!.url!, ...(range.properties?.tooltip ? { tooltip: range.properties.tooltip } : {}) } : null }
+  return { text: piece(0), runs: runs.length ? runs : null, link: range ? { url: range.properties!.url!, ...(range.properties?.tooltip ? { tooltip: range.properties.tooltip } : {}) } : null }
 }
 
 interface SharedGroup {
@@ -292,7 +296,7 @@ function writeSheet(book: ExcelJS.Workbook, workbook: WorkbookSnapshot, sheet: S
           }
         }
       } else {
-        target.value = result
+        target.value = typeof result === 'string' ? escaped(result) : result
       }
     }
 

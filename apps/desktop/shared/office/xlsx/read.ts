@@ -4,7 +4,7 @@ import { CELL_TYPE, type CellMatrix, type CellSnapshot, type SheetSnapshot, type
 import { parseRange } from './address.ts'
 import { type ExcelColor, indexedColors, type Palette, resolveColor, themeColors } from './colors.ts'
 import { inspectPackage } from './fidelity.ts'
-import { formulaFromExcel } from './formula.ts'
+import { ERROR_VALUES, formulaFromExcel } from './formula.ts'
 import { openPackage, type PackageSheet } from './package.ts'
 import { conditionalFromExcel, definedNamesFromPackage, filterFromXml, linksFromXml, type Resource, RESOURCES, ruleId, type SheetLink, univerLinkPayload, type UAutoFilter, type UConditionalRule, type UValidation, validationsFromXml } from './rules.ts'
 import { type BaseFont, baseStyle, EXCEL_BASE, fontStyle, styleFromExcel, type UStyle } from './styles.ts'
@@ -153,7 +153,7 @@ function valueOf(value: unknown, date1904: boolean): Pick<CellSnapshot, 'v' | 't
   }
 
   if (typeof value === 'string') {
-    return { v: value, t: NUMBER_TEXT.test(value.trim()) ? CELL_TYPE.text : CELL_TYPE.string }
+    return { v: value, t: NUMBER_TEXT.test(value.trim()) || ERROR_VALUES.has(value) ? CELL_TYPE.text : CELL_TYPE.string }
   }
 
   if (typeof value === 'object' && 'error' in (value as object)) {
