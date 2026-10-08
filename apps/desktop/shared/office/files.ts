@@ -26,17 +26,22 @@ export interface OfficeFormat {
 }
 
 export const OFFICE_FORMATS: readonly OfficeFormat[] = [
-  { extension: '.docx', app: 'docs', label: 'Word document', kind: 'office', opens: false, saves: false },
+  { extension: '.docx', app: 'docs', label: 'Word document', kind: 'office', opens: true, saves: true },
+  // Opened without its macros; saved as .docx.
+  { extension: '.docm', app: 'docs', label: 'Word document', kind: 'office', opens: true, saves: false },
   { extension: '.md', app: 'docs', label: 'Markdown', kind: 'text', opens: true, saves: true },
   { extension: '.markdown', app: 'docs', label: 'Markdown', kind: 'text', opens: true, saves: false },
   { extension: '.txt', app: 'docs', label: 'Plain text', kind: 'text', opens: true, saves: true },
-  { extension: '.odt', app: 'docs', label: 'OpenDocument text', kind: 'converted', opens: true, saves: true, via: '.docx' },
+  // Off until opening and saving go through LibreOffice: Herald reads only the .docx it converts to.
+  { extension: '.odt', app: 'docs', label: 'OpenDocument text', kind: 'converted', opens: false, saves: false, via: '.docx' },
   { extension: '.xlsx', app: 'sheets', label: 'Excel workbook', kind: 'office', opens: true, saves: true },
   { extension: '.xlsm', app: 'sheets', label: 'Excel macro-enabled workbook', kind: 'office', opens: true, saves: false },
   { extension: '.csv', app: 'sheets', label: 'CSV', kind: 'text', opens: true, saves: true },
-  { extension: '.ods', app: 'sheets', label: 'OpenDocument spreadsheet', kind: 'converted', opens: true, saves: true, via: '.xlsx' },
+  // Off like .odt: Herald Sheets reads only the .xlsx LibreOffice converts to.
+  { extension: '.ods', app: 'sheets', label: 'OpenDocument spreadsheet', kind: 'converted', opens: false, saves: false, via: '.xlsx' },
   { extension: '.pptx', app: 'slides', label: 'PowerPoint presentation', kind: 'office', opens: false, saves: false },
-  { extension: '.odp', app: 'slides', label: 'OpenDocument presentation', kind: 'converted', opens: true, saves: true, via: '.pptx' }
+  // Off like .odt: Herald Slides reads only the .pptx LibreOffice converts to.
+  { extension: '.odp', app: 'slides', label: 'OpenDocument presentation', kind: 'converted', opens: false, saves: false, via: '.pptx' }
 ]
 
 /** What the machine adds: LibreOffice for the converted formats. */
