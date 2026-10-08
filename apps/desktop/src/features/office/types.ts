@@ -4,6 +4,8 @@ import type { OfficeApp } from '../../../shared/office/files.ts'
 export interface EditorHandle<Model> {
   /** The document as it is now. */
   snapshot: () => Model
+  /** Wait for what a change is still working out (a sheet's formula results), before a save or print takes the snapshot. */
+  settle?: () => Promise<void>
   /** Show another version (one that changed on disk); history starts again from it. */
   load: (model: Model) => void
   undo: () => void

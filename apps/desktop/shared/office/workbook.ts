@@ -50,19 +50,33 @@ export function newWorkbook(id: string, name: string, sheets: SheetSnapshot[] = 
   return { id, name, appVersion: '1.0.3', locale: 'enUS', styles: {}, sheetOrder: sheets.map((sheet) => sheet.id), sheets: Object.fromEntries(sheets.map((sheet) => [sheet.id, sheet])) }
 }
 
-/** The cells of a sheet in row and column order, skipping empty rows. */
+const isIndex = (value: number): boolean => Number.isInteger(value) && value >= 0
+
+/** The cells of a sheet in row and column order, skipping empty rows (and keys that are not a row or column, which Univer can leave). */
 export function* cellsOf(sheet: Pick<SheetSnapshot, 'cellData'>): Generator<{ row: number; column: number; cell: CellSnapshot }> {
-  for (const row of Object.keys(sheet.cellData ?? {}).map(Number).sort((a, b) => a - b)) {
+  for (const row of Object.keys(sheet.cellData ?? {}).map(Number).filter(isIndex).sort((a, b) => a - b)) {
     const columns = sheet.cellData[row] ?? {}
 
-    for (const column of Object.keys(columns).map(Number).sort((a, b) => a - b)) {
-      yield { row, column, cell: columns[column] }
+    for (const column of Object.keys(columns).map(Number).filter(isIndex).sort((a, b) => a - b)) {
+      if (columns[column]) {
+        yield { row, column, cell: columns[column] }
+      }
     }
   }
 }
 
 /** Whether a cell shows anything: a value or a formula. */
-export const hasContent = (cell: CellSnapshot | undefined): boolean => Boolean(cell) && ((cell!.v !== undefined && cell!.v !== null && cell!.v !== '') || Boolean(cell!.f))
+export const hasContent = (cell: CellSnapshot | undefined): boolean => Boolean(cell) && ((cell!.v !== undefined && cell!.v !== null && cell!.v !== '') || Boolean(cell!.f) || plainTextOf(cell) !== '')
+
+/**
+ * The text of a cell's rich text, line breaks as "\n". Univer keeps some cells as rich text alone,
+ * with no value: text typed into a formatted cell, whose first letter gets a run of its own, and linked text.
+ */
+export function plainTextOf(cell: CellSnapshot | undefined): string {
+  const stream = (cell?.p as { body?: { dataStream?: string } } | null | undefined)?.body?.dataStream ?? ''
+
+  return stream.replace(/\r?\n$/, '').replace(/\r$/, '').replace(/\r\n?/g, '\n')
+}
 
 const isEmptyStyle = (style: unknown): boolean => !style || (typeof style === 'object' && Object.keys(style).length === 0)
 
@@ -85,6 +99,21 @@ function withoutColor(style: Record<string, unknown>, automatic: string): Record
   const { cl: _automatic, ...rest } = style
 
   return rest
+}
+
+type TextRun = { st: number; ed: number; ts?: Record<string, unknown> }
+
+/** A cell whose rich text has runs in the automatic colour, without it. */
+function withoutRunColor(cell: CellSnapshot, automatic: string): CellSnapshot {
+  const body = (cell.p as { body?: { textRuns?: TextRun[] } } | null | undefined)?.body
+
+  if (!body?.textRuns?.some((run) => sameColor((run.ts?.cl as { rgb?: string } | undefined)?.rgb, automatic))) {
+    return cell
+  }
+
+  const textRuns = body.textRuns.map((run) => (run.ts ? { ...run, ts: withoutColor(run.ts, automatic) } : run))
+
+  return { ...cell, p: { ...(cell.p as object), body: { ...body, textRuns } } }
 }
 
 /**
@@ -115,7 +144,7 @@ export function withoutAutomaticColor(workbook: WorkbookSnapshot, automatic: str
 
       for (const [column, cell] of Object.entries(columns)) {
         const style = typeof cell.s === 'string' ? (emptied.has(cell.s) ? null : cell.s) : cell.s ? withoutColor(cell.s, automatic) : cell.s
-        const { s: _style, ...rest } = cell
+        const { s: _style, ...rest } = withoutRunColor(cell, automatic)
         cellData[Number(row)][Number(column)] = isEmptyStyle(style) ? rest : { ...rest, s: style }
       }
     }

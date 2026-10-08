@@ -240,6 +240,7 @@ export function createSession<Model>(adapter: OfficeAdapter<Model>) {
 
     const entry = tracked.get(doc.key)
     const edits = entry?.edits ?? 0
+    await doc.editor?.settle?.()
     const model = doc.editor?.snapshot() ?? doc.initial
     const sameFile = target.path === doc.path
     const { bytes, losses } = await adapter.write(model, target.extension, target.extension === doc.format ? doc.layout : undefined)
@@ -415,6 +416,7 @@ export function createSession<Model>(adapter: OfficeAdapter<Model>) {
     }
 
     try {
+      await doc.editor?.settle?.()
       const view = await adapter.print(doc.editor?.snapshot() ?? doc.initial, doc.name)
       const file = await window.heraldOS.office.exportPdf({ html: view.html, suggestedName: doc.name, landscape: view.landscape, path })
 
