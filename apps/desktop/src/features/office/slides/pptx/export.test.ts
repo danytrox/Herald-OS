@@ -3,12 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { type Deck, type ImageElement, type LineElement, type ShapeElement, SLIDE_SIZES, type TextElement } from '../deck.ts'
 import { placeholderFor } from '../layouts.ts'
 import * as model from '../model.ts'
+import { settleSpans, withCell } from '../tables.ts'
 import { themeById } from '../themes.ts'
 import { plainText } from '../text.ts'
 import { writePptx } from './export.ts'
 import { HERALD_CONTENT_TYPE, HERALD_PART, HERALD_RELATIONSHIP } from './herald-part.ts'
 import { readPresentation } from './read.ts'
-import { attr, child, descendants, find, parseXml, textOf, type XmlElement } from './xml.ts'
+import { attr, child, childrenNamed, descendants, elements, find, parseXml, textOf, type XmlElement } from './xml.ts'
 
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
 
@@ -37,6 +38,36 @@ function sampleDeck(): Deck {
   deck = model.addImage(deck, shapes.slideId, { src: PNG, natural: { width: 1, height: 1 }, x: 100, y: 300, width: 200, height: 100, alt: 'A dot' }).deck
   const picture = deck.slides[2].elements.at(-1) as ImageElement
   deck = model.updateElements(deck, shapes.slideId, [picture.id], (element) => ({ ...element, crop: { left: 0.1, top: 0.2, right: 0.05, bottom: 0 } }), 'Crop').deck
+  const table = model.addTable(deck, shapes.slideId, {
+    rows: 3,
+    columns: 3,
+    x: 560,
+    y: 360,
+    width: 360,
+    height: 120,
+    cells: [
+      ['Team', '', 'Size'],
+      ['North', 'Oslo', '12'],
+      ['', 'Bergen', '8']
+    ]
+  })
+  deck = model.updateElements(
+    table.deck,
+    shapes.slideId,
+    [table.elementId],
+    (element) => {
+      if (element.kind !== 'table') {
+        return element
+      }
+
+      const merged = withCell(withCell(element, { row: 0, column: 0 }, (cell) => ({ ...cell, colSpan: 2 })), { row: 1, column: 0 }, (cell) => ({ ...cell, rowSpan: 2 }))
+      const styled = withCell(merged, { row: 1, column: 1 }, (cell) => ({ ...cell, body: { ...cell.body, anchor: 'middle', paragraphs: [{ align: 'center', runs: [{ text: 'Oslo', bold: true, color: 'accent2' }] }] } }))
+
+      return { ...styled, cells: settleSpans(styled.cells, styled.columns.length) }
+    },
+    'Merge'
+  ).deck
+  deck = model.setCellFill(deck, shapes.slideId, table.elementId, [{ row: 1, column: 2 }], { color: '#ffcc00' }).deck
   deck = model.setBackground(deck, [shapes.slideId], { kind: 'gradient', stops: [{ at: 0, color: 'bg1' }, { at: 1, color: 'accent1' }], angle: 90 }).deck
 
   const hidden = model.addSlide(deck, { layout: 'section', title: 'Backup' })
@@ -141,6 +172,69 @@ describe('writing PowerPoint files', () => {
     expect([attr(find(line, 'p:spPr/a:ln/a:headEnd'), 'type'), attr(find(line, 'p:spPr/a:ln/a:tailEnd'), 'type')]).toEqual(['oval', 'triangle'])
     expect(find(picture, 'p:blipFill/a:srcRect')?.attrs).toEqual({ l: '10000', t: '20000', r: '5000', b: '0' })
     expect(attr(find(picture, 'p:nvPicPr/p:cNvPr'), 'descr')).toBe('A dot')
+  })
+
+  it('writes tables as PowerPoint has them: a grid column a column, a cell a column in every row, merged cells spanning and covering', async () => {
+    const { read } = await unzip(await writePptx(sampleDeck()))
+    const tree = find(await read('ppt/slides/slide3.xml'), 'p:cSld/p:spTree')
+    const [frame] = descendants(tree, 'p:graphicFrame')
+    const tbl = find(frame, 'a:graphic/a:graphicData/a:tbl')
+    const rows = childrenNamed(tbl, 'a:tr')
+    const cells = rows.map((tr) => childrenNamed(tr, 'a:tc'))
+    const ids = descendants(tree, 'p:cNvPr').map((node) => node.attrs.id)
+    const properties = (row: number, column: number) => child(cells[row][column], 'a:tcPr')
+
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(attr(find(frame, 'p:nvGraphicFramePr/p:cNvPr'), 'name')).toBe('Table 1')
+    expect(attr(find(frame, 'a:graphic/a:graphicData'), 'uri')).toBe('http://schemas.openxmlformats.org/drawingml/2006/table')
+    expect(['a:off', 'a:ext'].flatMap((name) => Object.values(find(frame, `p:xfrm/${name}`)?.attrs ?? {}))).toEqual(['7112000', '4572000', '4572000', '1524000'])
+    expect(elements(tbl).map((node) => node.name)).toEqual(['a:tblPr', 'a:tblGrid', 'a:tr', 'a:tr', 'a:tr'])
+    expect(childrenNamed(child(tbl, 'a:tblGrid'), 'a:gridCol').map((column) => column.attrs.w)).toEqual(['1524000', '1524000', '1524000'])
+    expect(rows.map((tr) => tr.attrs.h)).toEqual(['508000', '508000', '508000'])
+    expect(cells.map((row) => row.length)).toEqual([3, 3, 3])
+
+    for (const tc of cells.flat()) {
+      const body = elements(child(tc, 'a:txBody'))
+
+      expect(elements(tc).map((node) => node.name)).toEqual(['a:txBody', 'a:tcPr'])
+      expect(body.map((node) => node.name)).toEqual(['a:bodyPr', 'a:lstStyle', ...body.slice(2).map(() => 'a:p')])
+      expect(body.length).toBeGreaterThan(2)
+    }
+
+    expect(cells.map((row) => row.map((tc) => ['gridSpan', 'rowSpan', 'hMerge', 'vMerge'].map((key) => tc.attrs[key] ?? '').join(',')))).toEqual([
+      ['2,,,', ',,1,', ',,,'],
+      [',2,,', ',,,', ',,,'],
+      [',,,1', ',,,', ',,,']
+    ])
+    expect(cells.map((row) => row.map((tc) => descendants(tc, 'a:t').map(textOf).join('')))).toEqual([
+      ['Team', '', 'Size'],
+      ['North', 'Oslo', '12'],
+      ['', 'Bergen', '8']
+    ])
+    expect(elements(properties(0, 0)).map((node) => node.name)).toEqual(['a:lnL', 'a:lnR', 'a:lnT', 'a:lnB', 'a:solidFill'])
+    expect(properties(0, 0)?.attrs).toEqual({ marL: '91440', marR: '91440', marT: '45720', marB: '45720', anchor: 't' })
+    expect(attr(find(properties(0, 0), 'a:lnB'), 'w')).toBe('12700')
+    expect(attr(find(properties(0, 0), 'a:lnB/a:solidFill/a:schemeClr'), 'val')).toBe('bg1')
+    expect(attr(find(properties(0, 0), 'a:solidFill/a:schemeClr'), 'val')).toBe('accent1')
+    expect(attr(find(properties(1, 1), 'a:solidFill/a:schemeClr/a:alpha'), 'val')).toBe('40000')
+    expect(attr(properties(1, 1), 'anchor')).toBe('ctr')
+    expect(attr(find(properties(1, 2), 'a:solidFill/a:srgbClr'), 'val')).toBe('FFCC00')
+    expect(attr(find(cells[1][1], 'a:txBody/a:p/a:pPr'), 'algn')).toBe('ctr')
+    expect(attr(find(cells[1][1], 'a:txBody/a:p/a:r/a:rPr'), 'b')).toBe('1')
+    expect(attr(find(cells[1][1], 'a:txBody/a:p/a:r/a:rPr/a:solidFill/a:schemeClr'), 'val')).toBe('accent2')
+    expect(attr(find(cells[0][0], 'a:txBody/a:p/a:r/a:rPr/a:solidFill/a:schemeClr'), 'val')).toBe('bg1')
+  })
+
+  it('writes a table without lines or fills as having none', async () => {
+    const start = model.newDeck('Plain')
+    const slideId = start.slides[0].id
+    const added = model.addTable(start, slideId, { rows: 1, columns: 2 })
+    let deck = model.updateElements(added.deck, slideId, [added.elementId], (element) => (element.kind === 'table' ? { ...element, stroke: null } : element), 'Plain').deck
+    deck = model.setCellFill(deck, slideId, added.elementId, 'all', null).deck
+    const { read } = await unzip(await writePptx(deck))
+    const settings = descendants(await read('ppt/slides/slide1.xml'), 'a:tcPr')
+
+    expect(settings.map((node) => elements(node).map((part) => part.name + (child(part, 'a:noFill') ? ' none' : '')))).toEqual(Array(2).fill(['a:lnL none', 'a:lnR none', 'a:lnT none', 'a:lnB none', 'a:noFill']))
   })
 
   it('writes gradient and picture backgrounds, hidden slides, the transition and notes a paragraph a line', async () => {

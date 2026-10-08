@@ -12,9 +12,10 @@ import { placeholderNames, placeholderSlots } from './placeholders.ts'
  * A deck as a PowerPoint file. PptxGenJS writes the package: a slide layout for each of Herald's
  * layouts with real placeholders (so PowerPoint knows each slide's title), every slide with its
  * placeholders' text, text boxes with their runs and lists, shapes as preset geometry, lines,
- * pictures, backgrounds and notes. A finishing pass then writes what PptxGenJS gets wrong or
- * cannot say (paragraph settings, text box settings, positions of placeholders, crops, gradients,
- * the theme's colours, the transition), and Herald's own copy of the deck goes in for itself.
+ * pictures, tables, backgrounds and notes. A finishing pass then writes what PptxGenJS gets wrong
+ * or cannot say (paragraph settings, text box settings, positions of placeholders, crops,
+ * gradients, merged cells and cell settings, the theme's colours, the transition), and Herald's own
+ * copy of the deck goes in for itself.
  */
 
 const inches = (points: number): number => points / 72
@@ -148,6 +149,10 @@ function addElement(target: PptxGenJS.Slide, element: SlideElement, deck: Deck, 
   }
 
   if (element.kind === 'table') {
+    // Every cell goes in as a cell of its own, covered ones too, so each row has one for every column; the finishing pass merges them.
+    const rows = element.cells.map((row) => row.map((cell) => ({ text: textObjects(cell.body, deck.theme), options: { fontFace: resolveFont(cell.body.style.font, deck.theme), fontSize: cell.body.style.size } })))
+    target.addTable(rows, { x: inches(element.x), y: inches(element.y), w: inches(element.width), h: inches(element.height), colW: element.columns.map(inches), rowH: element.rows.map(inches), objectName: element.id })
+
     return
   }
 

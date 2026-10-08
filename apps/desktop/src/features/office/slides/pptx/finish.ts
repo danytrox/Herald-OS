@@ -1,8 +1,9 @@
 import type JSZip from 'jszip'
-import type { Background, Color, Deck, LayoutId, Paragraph, PlaceholderRole, Slide, SlideElement, Stroke, TextBody, Theme } from '../deck.ts'
+import type { Background, Color, Deck, LayoutId, Paragraph, PlaceholderRole, Slide, SlideElement, Stroke, TableCell, TableElement, TextBody, Theme } from '../deck.ts'
 import { EMU_PER_POINT, LAYOUTS, SLIDE_SIZES } from '../deck.ts'
 import { coverCrop, describeElement } from '../elements.ts'
 import { LAYOUT_NAMES } from '../layouts.ts'
+import { cellUnder } from '../tables.ts'
 import { isSlot } from '../themes.ts'
 import { bulletFor, numberingFor, paragraphIndent } from '../text.ts'
 import { placeholderIndex, placeholderNames, placeholderSlots } from './placeholders.ts'
@@ -11,10 +12,11 @@ import { child, childrenNamed, descendants, elements, find, parseXml, serializeX
 /*
  * What a PowerPoint file needs after PptxGenJS has written it. PptxGenJS repeats a paragraph's
  * settings before each of its runs, takes a placeholder's position and text box settings from its
- * layout whatever the slide says, cannot write gradients, crops, picture outlines or adjust
- * values, and leaves Office's colours in the theme; so each slide's elements get their paragraph
- * and text box settings, positions and geometry from the deck itself, empty placeholders Herald
- * did not have go, and the theme gets the deck's colours.
+ * layout whatever the slide says, cannot write gradients, crops, picture outlines, adjust values
+ * or a table's cells as PowerPoint has them, numbers tables apart from other shapes, and leaves
+ * Office's colours in the theme; so each slide's elements get their paragraph and text box
+ * settings, positions, geometry and table cells from the deck itself, every shape a unique id,
+ * empty placeholders Herald did not have go, and the theme gets the deck's colours.
  */
 
 const emu = (points: number): string => String(Math.round(points * EMU_PER_POINT))
@@ -116,16 +118,21 @@ function setLine(spPr: XmlElement, line: XmlElement): void {
 /** How much a text body's text was shrunk to fit when last drawn, when the window knows. */
 export type ShrinkOf = (body: TextBody) => number | undefined
 
+/** The name PowerPoint's selection pane shows: the element's own, or what it is and a number (Herald's ids stay in Herald's own copy). */
+function nameOf(element: SlideElement, names: Map<string, number>): string {
+  const base = element.name ?? describeElement(element)
+  const n = (names.get(base) ?? 0) + 1
+  names.set(base, n)
+
+  return element.name ?? `${base} ${n}`
+}
+
 function finishElement(node: XmlElement, element: SlideElement, names: Map<string, number>, shrink?: ShrinkOf): void {
   const nv = child(node, node.name === 'p:pic' ? 'p:nvPicPr' : 'p:nvSpPr')
   const cNvPr = child(nv, 'p:cNvPr')
 
-  // PowerPoint's selection pane shows these names; Herald's ids stay in Herald's own copy.
   if (cNvPr) {
-    const base = element.name ?? describeElement(element)
-    const n = (names.get(base) ?? 0) + 1
-    names.set(base, n)
-    cNvPr.attrs.name = element.name ?? `${base} ${n}`
+    cNvPr.attrs.name = nameOf(element, names)
   }
 
   const spPr = child(node, 'p:spPr')
@@ -166,6 +173,112 @@ function finishElement(node: XmlElement, element: SlideElement, names: Map<strin
 
   if (txBody && (element.kind === 'text' || element.kind === 'shape')) {
     finishText(txBody, element.body, shrink?.(element.body))
+  }
+}
+
+/** Lengths in EMU, each rounded where it ends, so together they are their total rounded. */
+function emuSpans(lengths: readonly number[]): number[] {
+  let at = 0
+  let written = 0
+
+  return lengths.map((length) => {
+    at += length
+    const end = Math.round(at * EMU_PER_POINT)
+    const span = end - written
+    written = end
+
+    return span
+  })
+}
+
+const ANCHOR = { top: 't', middle: 'ctr', bottom: 'b' } as const
+
+/** A cell's settings as PowerPoint reads them: its margins and anchor, the table's lines on every side, and its fill. */
+function cellPropertiesXml(cell: TableCell, stroke: Stroke | null): XmlElement {
+  const [left, top, right, bottom] = cell.body.inset
+  const side = (name: string): XmlElement =>
+    stroke && stroke.width > 0 ? xml(name, { w: emu(stroke.width), cap: 'flat', cmpd: 'sng', algn: 'ctr' }, [solid(stroke.color, stroke.alpha), xml('a:prstDash', { val: DASH[stroke.dash] })]) : xml(name, {}, [xml('a:noFill')])
+
+  return xml('a:tcPr', { marL: emu(left), marR: emu(right), marT: emu(top), marB: emu(bottom), anchor: ANCHOR[cell.body.anchor] }, [
+    side('a:lnL'),
+    side('a:lnR'),
+    side('a:lnT'),
+    side('a:lnB'),
+    cell.fill ? solid(cell.fill.color, cell.fill.alpha) : xml('a:noFill')
+  ])
+}
+
+/** A cell's text as a table holds it: empty body properties (the cell's own give its margins), a list style, and at least one paragraph with its settings. */
+function cellTextXml(txBody: XmlElement | undefined, body: TextBody): XmlElement {
+  const written = childrenNamed(txBody, 'a:p')
+  const paragraphs = written.length ? written : [xml('a:p', {}, [xml('a:endParaRPr', { lang: 'en-US', dirty: '0' })])]
+
+  paragraphs.forEach((p, index) => {
+    const model = body.paragraphs[Math.min(index, body.paragraphs.length - 1)]
+    p.children = [paragraphXml(model), ...p.children.filter((node) => typeof node === 'string' || node.name !== 'a:pPr')]
+  })
+
+  return xml('a:txBody', {}, [xml('a:bodyPr'), xml('a:lstStyle'), ...paragraphs])
+}
+
+/**
+ * A table as the deck has it: its place, a grid column for each column, and each row with a cell
+ * for every column, each cell its text and then its settings, a merged cell's reach as gridSpan and
+ * rowSpan where it starts and the cells it covers marked hMerge and vMerge, as PowerPoint writes them.
+ * PptxGenJS wrote every cell as one of its own, so its cells are the deck's one for one.
+ */
+function finishTable(frame: XmlElement, table: TableElement): void {
+  const widths = emuSpans(table.columns)
+  const heights = emuSpans(table.rows)
+  const transform = child(frame, 'p:xfrm')
+  const tbl = find(frame, 'a:graphic/a:graphicData/a:tbl')
+
+  if (transform) {
+    transform.attrs = {}
+    transform.children = [xml('a:off', { x: emu(table.x), y: emu(table.y) }), xml('a:ext', { cx: widths.reduce((sum, width) => sum + width, 0), cy: heights.reduce((sum, height) => sum + height, 0) })]
+  }
+
+  if (!tbl) {
+    return
+  }
+
+  const rows = childrenNamed(tbl, 'a:tr')
+  tbl.children = [
+    child(tbl, 'a:tblPr') ?? xml('a:tblPr'),
+    xml(
+      'a:tblGrid',
+      {},
+      widths.map((width) => xml('a:gridCol', { w: width }))
+    ),
+    ...table.cells.map((row, r) => {
+      const written = childrenNamed(rows[r], 'a:tc')
+
+      return xml(
+        'a:tr',
+        { h: heights[r] },
+        row.map((cell, c) => {
+          const under = cell.merged ? cellUnder(table, { row: r, column: c }) : null
+          const reach = under ? { hMerge: c > under.column ? '1' : undefined, vMerge: r > under.row ? '1' : undefined } : { gridSpan: cell.colSpan, rowSpan: cell.rowSpan }
+
+          return xml('a:tc', reach, [cellTextXml(child(written[c], 'a:txBody'), cell.body), cellPropertiesXml(cell, table.stroke)])
+        })
+      )
+    })
+  ]
+}
+
+/** Every shape on a slide with an id of its own, as PowerPoint requires: PptxGenJS numbers tables apart from the rest. */
+function uniqueIds(tree: XmlElement): void {
+  const named = descendants(tree, 'p:cNvPr')
+  const seen = new Set<string>()
+  let next = Math.max(0, ...named.map((node) => Number(node.attrs.id) || 0)) + 1
+
+  for (const node of named) {
+    if (!/^\d+$/.test(node.attrs.id ?? '') || seen.has(node.attrs.id)) {
+      node.attrs.id = String(next++)
+    }
+
+    seen.add(node.attrs.id)
   }
 }
 
@@ -211,6 +324,18 @@ function finishSlide(root: XmlElement, slide: Slide, deck: Deck, shrink?: Shrink
   const byIndex = new Map([...placeholderSlots(slide)].map(([id, name]) => [String(placeholderIndex(slide.layout, name)), id]))
 
   tree.children = tree.children.filter((node) => {
+    if (typeof node !== 'string' && node.name === 'p:graphicFrame') {
+      const cNvPr = find(node, 'p:nvGraphicFramePr/p:cNvPr')
+      const element = byId.get(cNvPr?.attrs.name ?? '')
+
+      if (cNvPr && element?.kind === 'table') {
+        cNvPr.attrs.name = nameOf(element, names)
+        finishTable(node, element)
+      }
+
+      return true
+    }
+
     if (typeof node === 'string' || (node.name !== 'p:sp' && node.name !== 'p:pic')) {
       return true
     }
@@ -237,6 +362,7 @@ function finishSlide(root: XmlElement, slide: Slide, deck: Deck, shrink?: Shrink
     return true
   })
 
+  uniqueIds(tree)
   finishBackground(cSld, slide, deck)
 
   root.children = root.children.filter((node) => typeof node === 'string' || node.name !== 'p:transition')
