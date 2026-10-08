@@ -1,5 +1,6 @@
-import { type Deck, DeckHistory, findSlide, type Slide, type SlideElement } from './deck.ts'
+import { type Deck, DeckHistory, findElement, findSlide, type Slide, type SlideElement } from './deck.ts'
 import type { DeckChange } from './model.ts'
+import type { CellRef } from './tables.ts'
 
 /*
  * One open deck in the editor: its history, the slide in front, the slides picked in the list, what
@@ -15,6 +16,8 @@ export class SlidesDocument {
   selected: string[] = []
   /** The element whose text is being edited. */
   editing: string | null = null
+  /** The table cell typed into last, and its table. */
+  private lastCell: { tableId: string; cell: CellRef } | null = null
   /** A deck shown while a drag is under way, not yet a step. */
   preview: Deck | null = null
   /** How big the slide is shown: fitted to the window, or CSS pixels a point. */
@@ -50,6 +53,20 @@ export class SlidesDocument {
     return this.slide.elements.filter((element) => ids.has(element.id))
   }
 
+  /** The cell of the selected table being typed into, or typed into last while the table stayed selected. */
+  get cell(): CellRef | null {
+    const table = this.selected.length === 1 ? findElement(this.slide, this.selected[0]) : undefined
+    const last = this.lastCell
+
+    if (table?.kind !== 'table' || last?.tableId !== table.id) {
+      return null
+    }
+
+    const cell = table.cells[last.cell.row]?.[last.cell.column]
+
+    return cell && !cell.merged ? last.cell : null
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
 
@@ -77,8 +94,8 @@ export class SlidesDocument {
     const ids = new Set(this.slide.elements.map((element) => element.id))
     this.selected = this.selected.filter((id) => ids.has(id))
 
-    // Typing goes on only in an element that is still there and still the one selected.
-    if (this.editing && (!ids.has(this.editing) || !this.selected.includes(this.editing))) {
+    // Typing goes on only in an element that is still there and still the one selected (in a table, in a cell still there).
+    if (this.editing && (!ids.has(this.editing) || !this.selected.includes(this.editing) || (findElement(this.slide, this.editing)?.kind === 'table' && !this.cell))) {
       this.editing = null
     }
   }
@@ -180,14 +197,29 @@ export class SlidesDocument {
     this.changed()
   }
 
-  /** Start or stop typing into an element (which is then the selection). */
+  /** Start or stop typing into an element (which is then the selection); a table is typed into at its last cell, or its first. */
   edit(elementId: string | null): void {
     this.editing = elementId
 
     if (elementId) {
       this.selected = [elementId]
+
+      if (findElement(this.slide, elementId)?.kind === 'table' && !this.cell) {
+        this.lastCell = { tableId: elementId, cell: { row: 0, column: 0 } }
+      }
     }
 
     this.changed()
+  }
+
+  /** Make a cell of a table the one commands act on (`typing` starts typing into it). */
+  goToCell(tableId: string, cell: CellRef, typing = false): void {
+    this.lastCell = { tableId, cell: { row: cell.row, column: cell.column } }
+
+    if (typing) {
+      this.edit(tableId)
+    } else {
+      this.changed()
+    }
   }
 }

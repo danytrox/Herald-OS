@@ -45,6 +45,17 @@ function StageMenu({ doc, at, onClose }: { doc: SlidesDocument; at: { x: number;
   const items: MenuItemDef[] = selection.length
     ? [
         ...(only && (only.kind === 'text' || only.kind === 'shape') ? [{ id: 'edit', label: 'Edit Text', onSelect: () => commands.editSelection('end') }] : []),
+        ...(only?.kind === 'table'
+          ? [
+              { id: 'edit-cell', label: 'Edit Cell', onSelect: () => commands.editSelection('end') },
+              { id: 'row-above', label: 'Insert Row Above', onSelect: () => commands.insertRow('above', doc), dividerBefore: true },
+              { id: 'row-below', label: 'Insert Row Below', onSelect: () => commands.insertRow('below', doc) },
+              { id: 'column-left', label: 'Insert Column Left', onSelect: () => commands.insertColumn('left', doc) },
+              { id: 'column-right', label: 'Insert Column Right', onSelect: () => commands.insertColumn('right', doc) },
+              { id: 'delete-row', label: 'Delete Row', onSelect: () => commands.deleteRows(doc), disabled: !commands.hasTableCell(doc) },
+              { id: 'delete-column', label: 'Delete Column', onSelect: () => commands.deleteColumns(doc), disabled: !commands.hasTableCell(doc) }
+            ]
+          : []),
         ...(only?.kind === 'image' ? [{ id: 'picture', label: isEmptyPlaceholder(only) ? 'Choose Picture…' : 'Replace Picture…', onSelect: () => commands.pickPictures(doc) }, ...(only.crop ? [{ id: 'crop', label: 'Reset Crop', onSelect: commands.resetCrop }] : [])] : []),
         { id: 'cut', label: 'Cut', onSelect: () => commands.copyToClipboard(true, doc), dividerBefore: Boolean(only && only.kind !== 'line') },
         { id: 'copy', label: 'Copy', onSelect: () => commands.copyToClipboard(false, doc) },

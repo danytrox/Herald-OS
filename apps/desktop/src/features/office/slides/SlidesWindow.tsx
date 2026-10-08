@@ -60,13 +60,48 @@ function slideCommands(): OfficeCommand[] {
   ]
 }
 
+/** Rows and columns of the tables the Insert menu offers; the toolbar's grid picks any size up to 8 by 10. */
+const TABLE_SIZES = [
+  [2, 2],
+  [3, 2],
+  [3, 3],
+  [4, 3],
+  [4, 4],
+  [5, 4],
+  [6, 5]
+] as const
+
 function insertCommands(): OfficeCommand[] {
   return [
     { id: 'insert-text', label: 'Text Box', enabled: hasDeck, run: commands.insertText },
     { id: 'insert-shape', label: 'Shape', enabled: hasDeck, run: () => {}, submenu: INSERTABLE.map((kind) => ({ id: `shape-${kind}`, label: SHAPE_NAMES[kind], run: () => commands.insertShape(kind) })) },
     { id: 'insert-line', label: 'Line', enabled: hasDeck, run: () => commands.insertLine('none') },
     { id: 'insert-arrow', label: 'Arrow', enabled: hasDeck, run: () => commands.insertLine('triangle') },
-    { id: 'insert-picture', label: 'Picture…', enabled: hasDeck, run: () => commands.pickPictures() }
+    { id: 'insert-picture', label: 'Picture…', enabled: hasDeck, run: () => commands.pickPictures() },
+    {
+      id: 'insert-table',
+      label: 'Table',
+      enabled: hasDeck,
+      run: () => {},
+      submenu: TABLE_SIZES.map(([rows, columns]) => ({ id: `table-${rows}-${columns}`, label: `${rows} rows, ${columns} columns`, run: () => commands.insertTable(rows, columns) }))
+    }
+  ]
+}
+
+const hasTable = () => {
+  const doc = commands.live()
+
+  return Boolean(doc && doc.selected.length === 1 && doc.selection[0]?.kind === 'table')
+}
+
+function tableCommands(): OfficeCommand[] {
+  return [
+    { id: 'table-row-above', label: 'Insert Row Above', enabled: hasTable, run: () => commands.insertRow('above') },
+    { id: 'table-row-below', label: 'Insert Row Below', enabled: hasTable, run: () => commands.insertRow('below') },
+    { id: 'table-column-left', label: 'Insert Column Left', enabled: hasTable, run: () => commands.insertColumn('left') },
+    { id: 'table-column-right', label: 'Insert Column Right', enabled: hasTable, run: () => commands.insertColumn('right') },
+    { id: 'table-delete-row', label: 'Delete Row', enabled: () => commands.hasTableCell(), run: () => commands.deleteRows(), dividerBefore: true },
+    { id: 'table-delete-column', label: 'Delete Column', enabled: () => commands.hasTableCell(), run: () => commands.deleteColumns() }
   ]
 }
 
@@ -159,6 +194,7 @@ export function SlidesWindow({ payload }: { payload?: Record<string, unknown> })
           { id: 'slide', label: 'Slide', items: slideCommands() },
           { id: 'format', label: 'Format', items: formatCommands() },
           { id: 'arrange', label: 'Arrange', items: arrangeCommands() },
+          { id: 'table', label: 'Table', items: tableCommands() },
           {
             id: 'view',
             label: 'View',

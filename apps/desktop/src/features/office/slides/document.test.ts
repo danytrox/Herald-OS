@@ -87,6 +87,32 @@ describe('SlidesDocument', () => {
     expect(doc.slideId).toBe(loaded.slides[0].id)
   })
 
+  it('keeps the cell of a selected table that is typed into, while it and its table are there', () => {
+    const doc = new SlidesDocument(model.newDeck('Pitch'), () => {})
+    const added = model.addTable(doc.history.present, doc.slideId, { rows: 3, columns: 3 })
+    doc.commit(added)
+    const id = added.elementId
+
+    doc.edit(id)
+    expect([doc.editing, doc.cell]).toEqual([id, { row: 0, column: 0 }])
+
+    doc.goToCell(id, { row: 2, column: 1 }, true)
+    doc.edit(null)
+    expect([doc.editing, doc.cell]).toEqual([null, { row: 2, column: 1 }])
+
+    doc.edit(id)
+    expect(doc.cell).toEqual({ row: 2, column: 1 })
+
+    doc.commit(model.removeTableRows(doc.history.present, doc.slideId, id, [2]))
+    expect([doc.editing, doc.cell, doc.selected]).toEqual([null, null, [id]])
+
+    doc.goToCell(id, { row: 1, column: 1 })
+    doc.select([doc.slide.elements[0].id])
+    expect(doc.cell).toBeNull()
+    doc.select([id])
+    expect(doc.cell).toEqual({ row: 1, column: 1 })
+  })
+
   it('keeps the zoom within reason', () => {
     const doc = new SlidesDocument(model.newDeck('Pitch'), () => {})
     doc.setZoom(100)

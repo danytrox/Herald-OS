@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef } from 'react'
 import type { Deck, SlideElement, TextBody, Theme } from '../deck.ts'
 import { findElement, findSlide, withElements } from '../deck.ts'
 import type { SlidesDocument } from '../document.ts'
+import { type CellRef, fitRow, withCell } from '../tables.ts'
 import { fitText } from '../view/fit.ts'
 import { flowCss, styleText } from '../view/text-style.ts'
 import { $textRevision, $textSession, editStartFor, requestEditStart, type TextSession } from './active.ts'
@@ -56,8 +57,15 @@ export function selectWordAt(editor: Editor, x: number, y: number, word = true):
   editor.view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, $at.start() + from, $at.start() + to)))
 }
 
-function withText(deck: Deck, slideId: string, elementId: string, paragraphs: TextBody['paragraphs'], height: number | null): Deck {
+/** The deck with what is typed in an element (or a table's cell), and the height it grows to: the element's, or the cell's rows' together. */
+function withText(deck: Deck, slideId: string, elementId: string, cell: CellRef | null, paragraphs: TextBody['paragraphs'], height: number | null): Deck {
   return withElements(deck, slideId, new Set([elementId]), (element): SlideElement => {
+    if (element.kind === 'table' && cell) {
+      const typed = withCell(element, cell, (entry) => ({ ...entry, body: { ...entry.body, paragraphs } }))
+
+      return height !== null ? fitRow(typed, cell, height) : typed
+    }
+
     if (element.kind !== 'text' && element.kind !== 'shape') {
       return element
     }
@@ -68,7 +76,7 @@ function withText(deck: Deck, slideId: string, elementId: string, paragraphs: Te
   })
 }
 
-export function TextEditor({ doc, slideId, elementId, body, theme }: { doc: SlidesDocument; slideId: string; elementId: string; body: TextBody; theme: Theme }) {
+export function TextEditor({ doc, slideId, elementId, cell = null, onTab, body, theme }: { doc: SlidesDocument; slideId: string; elementId: string; cell?: CellRef | null; onTab?: (by: 1 | -1) => void; body: TextBody; theme: Theme }) {
   const host = useRef<HTMLDivElement>(null)
 
   useLayoutEffect(() => {
@@ -97,6 +105,14 @@ export function TextEditor({ doc, slideId, elementId, body, theme }: { doc: Slid
             return true
           }
 
+          // In a table, Tab and Shift+Tab move between cells, as in PowerPoint, rather than change list levels.
+          if (cell && onTab && event.key === 'Tab' && !event.altKey && !event.metaKey && !event.ctrlKey) {
+            event.preventDefault()
+            onTab(event.shiftKey ? -1 : 1)
+
+            return true
+          }
+
           return false
         }
       }
@@ -104,10 +120,17 @@ export function TextEditor({ doc, slideId, elementId, body, theme }: { doc: Slid
     const root = editor.view.dom as HTMLElement
     const [, top, , bottom] = body.inset
 
-    /** The element as it would be with what is typed: its paragraphs, and its height when it grows with its text. */
+    /** The element as it would be with what is typed: its paragraphs, and its height when it grows with its text (a cell's rows only ever grow). */
     const current = (): { paragraphs: TextBody['paragraphs']; height: number | null } => {
       const element = findElement(findSlide(doc.history.present, slideId), elementId)
       const paragraphs = paragraphsFromDoc(editor.getJSON(), body)
+
+      if (cell) {
+        const needed = root.offsetHeight + top + bottom
+
+        return { paragraphs, height: element?.kind === 'table' && fitRow(element, cell, needed) !== element ? needed : null }
+      }
+
       const height = element && body.fit === 'grow' ? Math.max(root.offsetHeight + top + bottom, 8) : null
 
       return { paragraphs, height: height !== null && element && Math.abs(height - element.height) > 0.5 ? height : null }
@@ -125,7 +148,7 @@ export function TextEditor({ doc, slideId, elementId, body, theme }: { doc: Slid
 
     const preview = () => {
       const { paragraphs, height } = current()
-      doc.show(withText(doc.history.present, slideId, elementId, paragraphs, height))
+      doc.show(withText(doc.history.present, slideId, elementId, cell, paragraphs, height))
     }
 
     /** Record the typing so far as one step. */
@@ -147,7 +170,7 @@ export function TextEditor({ doc, slideId, elementId, body, theme }: { doc: Slid
       }
 
       baseline = paragraphs
-      doc.commit({ deck: withText(doc.history.present, slideId, elementId, paragraphs, height), label: 'Typing' })
+      doc.commit({ deck: withText(doc.history.present, slideId, elementId, cell, paragraphs, height), label: 'Typing' })
     }
 
     const session: TextSession = {
@@ -210,7 +233,7 @@ export function TextEditor({ doc, slideId, elementId, body, theme }: { doc: Slid
 
       editor.destroy()
     }
-  }, [elementId])
+  }, [elementId, cell?.row, cell?.column])
 
   return <div ref={host} className="hs-editor-host" style={{ minWidth: 1 }} onPointerDown={(event) => event.stopPropagation()} />
 }

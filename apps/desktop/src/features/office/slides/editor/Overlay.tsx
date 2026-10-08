@@ -72,7 +72,7 @@ export function Overlay({ selection, editing, scale, guides, marquee }: { select
           })
         })()
       ) : single ? (
-        <Frame box={single} rotation={single.rotation} scale={scale} handles rotate />
+        <Frame box={single} rotation={single.rotation} scale={scale} handles rotate={single.kind !== 'table'} />
       ) : selection.length > 1 ? (
         <>
           {selection.map((element) => (element.kind === 'line' ? null : <Frame key={element.id} box={element} rotation={element.rotation} scale={scale} thin />))}

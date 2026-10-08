@@ -10,8 +10,9 @@ import { SlideView } from '../view/SlideView.tsx'
 
 /*
  * The formatting bar's pop-up choosers: colours (the theme's slots first, so a colour follows the
- * theme), fonts (the theme's, then the computer's), sizes, layouts and themes, each drawn as it
- * will look. They are marked like the bar, so picking from them keeps the text being typed into.
+ * theme), fonts (the theme's, then the computer's), sizes, a table's rows and columns, layouts and
+ * themes, each drawn as it will look. They are marked like the bar, so picking from them keeps the
+ * text being typed into.
  */
 
 /**
@@ -227,6 +228,39 @@ export function SizeList({ value, onPick }: { value: number; onPick: (size: numb
           {size}
         </button>
       ))}
+    </div>
+  )
+}
+
+const GRID_ROWS = 8
+const GRID_COLUMNS = 10
+
+/** Rows and columns for a new table, picked on a grid from its top left as in PowerPoint. */
+export function TableGrid({ onPick }: { onPick: (rows: number, columns: number) => void }) {
+  const [over, setOver] = useState({ rows: 0, columns: 0 })
+
+  return (
+    <div className="flex flex-col gap-2" onMouseLeave={() => setOver({ rows: 0, columns: 0 })}>
+      <div className="grid grid-cols-10 gap-[3px]">
+        {Array.from({ length: GRID_ROWS * GRID_COLUMNS }, (_, index) => {
+          const rows = Math.floor(index / GRID_COLUMNS) + 1
+          const columns = (index % GRID_COLUMNS) + 1
+          const lit = rows <= over.rows && columns <= over.columns
+
+          return (
+            <button
+              key={index}
+              type="button"
+              aria-label={`Table of ${rows} by ${columns}`}
+              onMouseEnter={() => setOver({ rows, columns })}
+              onFocus={() => setOver({ rows, columns })}
+              onClick={() => onPick(rows, columns)}
+              className={cn('size-4 rounded-[2px] border', lit ? 'border-accent bg-accent/30' : 'border-line bg-white/5')}
+            />
+          )
+        })}
+      </div>
+      <span className="text-[11.5px] text-fg-3 tabular-nums">{over.rows ? `${over.rows} ${over.rows === 1 ? 'row' : 'rows'}, ${over.columns} ${over.columns === 1 ? 'column' : 'columns'}` : 'Rows and columns'}</span>
     </div>
   )
 }

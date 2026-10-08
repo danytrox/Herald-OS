@@ -9,6 +9,9 @@ import {
   IconBold,
   IconChevronDown,
   IconCircle,
+  IconColumnInsertLeft,
+  IconColumnInsertRight,
+  IconColumnRemove,
   IconIndentDecrease,
   IconIndentIncrease,
   IconItalic,
@@ -22,14 +25,18 @@ import {
   IconPhoto,
   IconPlayerPlay,
   IconPlus,
+  IconRowInsertBottom,
+  IconRowInsertTop,
+  IconRowRemove,
   IconSquare,
   IconStrikethrough,
+  IconTable,
   IconTriangle,
   IconUnderline
 } from '@tabler/icons-react'
 import type { ReactNode } from 'react'
 import { cn } from '../../../../lib/cn.ts'
-import { ARROW_HEADS, type ArrowHead, type Color, type Dash, DASHES, type LineElement, type ShapeElement, type TextElement, type Theme } from '../deck.ts'
+import { ARROW_HEADS, type ArrowHead, type Color, type Dash, DASHES, type LineElement, type ShapeElement, type TableElement, type TextElement, type Theme } from '../deck.ts'
 import type { SlidesDocument } from '../document.ts'
 import { ARROW_NAMES } from '../elements.ts'
 import { DASH_NAMES, INSERTABLE, SHAPE_NAMES, shapePath } from '../shapes.ts'
@@ -37,7 +44,7 @@ import { resolveColor, resolveFont } from '../themes.ts'
 import { $textRevision, $textSession } from './active.ts'
 import { BackgroundPanel } from './BackgroundPanel.tsx'
 import * as commands from './commands.ts'
-import { ColorGrid, FontList, LayoutGrid, PopoverButton, SizeList, ThemeGrid } from './pickers.tsx'
+import { ColorGrid, FontList, LayoutGrid, PopoverButton, SizeList, TableGrid, ThemeGrid } from './pickers.tsx'
 import { useDeck } from './Stage.tsx'
 
 /*
@@ -172,15 +179,19 @@ function TextTools({ doc }: { doc: SlidesDocument }) {
 function ShapeTools({ doc }: { doc: SlidesDocument }) {
   const theme = doc.deck.theme
   const selection = doc.selection
-  const filled = selection.find((element): element is TextElement | ShapeElement => element.kind === 'shape' || element.kind === 'text')
+  const filled = selection.find((element): element is TextElement | ShapeElement | TableElement => element.kind === 'shape' || element.kind === 'text' || element.kind === 'table')
   const line = selection.find((element): element is LineElement => element.kind === 'line')
-  const fill = filled?.fill ?? null
+  const typing = filled?.kind === 'table' && doc.editing === filled.id ? doc.cell : null
+  const fill = filled?.kind === 'table' ? ((typing ? filled.cells[typing.row][typing.column] : filled.cells[0]?.[0])?.fill ?? null) : (filled?.fill ?? null)
   const stroke = selection[0]?.stroke ?? null
 
   return (
     <>
       {filled && (
-        <PopoverButton label="Fill" panel={(close) => <ColorGrid theme={theme} value={fill?.color ?? null} none noneLabel="No fill" onPick={(color) => (commands.setFill(color ? { color } : null), close())} />}>
+        <PopoverButton
+          label={filled.kind === 'table' ? (typing ? 'Cell fill' : 'Fill all cells') : 'Fill'}
+          panel={(close) => <ColorGrid theme={theme} value={fill?.color ?? null} none noneLabel="No fill" onPick={(color) => (commands.setFill(color ? { color } : null), close())} />}
+        >
           <span className="flex flex-col items-center gap-[2px]">
             <IconSquare size={14} />
             <Swatch color={fill?.color ?? null} theme={theme} />
@@ -244,12 +255,40 @@ function ShapeTools({ doc }: { doc: SlidesDocument }) {
   )
 }
 
+/** Rows and columns in and out at the selected table's current cell. */
+function TableTools({ doc }: { doc: SlidesDocument }) {
+  const atCell = commands.hasTableCell(doc)
+
+  return (
+    <>
+      <Tool label="Insert row above" onClick={() => commands.insertRow('above', doc)}>
+        <IconRowInsertTop />
+      </Tool>
+      <Tool label="Insert row below" onClick={() => commands.insertRow('below', doc)}>
+        <IconRowInsertBottom />
+      </Tool>
+      <Tool label="Insert column left" onClick={() => commands.insertColumn('left', doc)}>
+        <IconColumnInsertLeft />
+      </Tool>
+      <Tool label="Insert column right" onClick={() => commands.insertColumn('right', doc)}>
+        <IconColumnInsertRight />
+      </Tool>
+      <Tool label="Delete row" disabled={!atCell} onClick={() => commands.deleteRows(doc)}>
+        <IconRowRemove />
+      </Tool>
+      <Tool label="Delete column" disabled={!atCell} onClick={() => commands.deleteColumns(doc)}>
+        <IconColumnRemove />
+      </Tool>
+    </>
+  )
+}
+
 export function Toolbar({ doc }: { doc: SlidesDocument }) {
   useDeck(doc)
   const session = useStore($textSession)
   const deck = doc.deck
   const selection = doc.selection
-  const texty = session?.doc === doc || selection.some((element) => element.kind === 'text' || element.kind === 'shape')
+  const texty = session?.doc === doc || selection.some((element) => element.kind === 'text' || element.kind === 'shape' || element.kind === 'table')
 
   return (
     <div data-slides-keep-editing="" className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto overflow-y-visible border-b border-line px-2 text-[12px]">
@@ -298,6 +337,9 @@ export function Toolbar({ doc }: { doc: SlidesDocument }) {
       <Tool label="Picture" onClick={() => commands.pickPictures(doc)}>
         <IconPhoto />
       </Tool>
+      <PopoverButton label="Table" panel={(close) => <TableGrid onPick={(rows, columns) => (close(), commands.insertTable(rows, columns, doc))} />}>
+        <IconTable />
+      </PopoverButton>
       {texty && (
         <>
           <Divider />
@@ -308,6 +350,12 @@ export function Toolbar({ doc }: { doc: SlidesDocument }) {
         <>
           <Divider />
           <ShapeTools doc={doc} />
+        </>
+      )}
+      {selection.length === 1 && selection[0].kind === 'table' && (
+        <>
+          <Divider />
+          <TableTools doc={doc} />
         </>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-2">

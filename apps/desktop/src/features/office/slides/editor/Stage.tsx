@@ -6,6 +6,7 @@ import { boundsOf, boundsOfAll, center, moveElement, type Point, withBox, withEn
 import { isEmptyPlaceholder } from '../layouts.ts'
 import * as model from '../model.ts'
 import { slidesSession } from '../store.ts'
+import type { CellRef } from '../tables.ts'
 import { type EditingSlot, SlideView } from '../view/SlideView.tsx'
 import { requestEditStart, textSessionOf } from './active.ts'
 import * as commands from './commands.ts'
@@ -16,7 +17,8 @@ import { selectWordAt, TextEditor } from './TextEditor.tsx'
 /*
  * The slide being edited: shown fitted to the window or at a zoom, with everything done to it by
  * pointer and keyboard. A drag shows its result as the document's preview and becomes one step when
- * the pointer lets go; a click on a selected text box starts typing where it was clicked.
+ * the pointer lets go; a click on a selected text box, or on a cell of a selected table, starts
+ * typing where it was clicked.
  */
 
 export function useDeck(doc: SlidesDocument | undefined): number {
@@ -32,7 +34,7 @@ const PAD = 36
 const SNAP = 6
 
 type Gesture =
-  | { kind: 'press'; id: string; wasSelected: boolean; start: Point; client: Point; duplicate: boolean }
+  | { kind: 'press'; id: string; wasSelected: boolean; start: Point; client: Point; duplicate: boolean; cell: CellRef | null }
   | { kind: 'move'; base: Deck; ids: string[]; bounds: Box; start: Point; label: string; lines: ReturnType<typeof snapLines>; others: Box[] }
   | { kind: 'resize'; base: Deck; ids: string[]; handle: Handle; start: Point; box: Box; rotation: number; ratio: boolean; lines: ReturnType<typeof snapLines> }
   | { kind: 'rotate'; base: Deck; id: string; middle: Point; start: Point; rotation: number }
@@ -42,6 +44,13 @@ type Gesture =
 export const isTyping = (target: EventTarget | null): boolean => target instanceof Element && Boolean(target.closest('.ProseMirror, input, textarea, select, [contenteditable="true"]'))
 
 const isTextual = (element: SlideElement | undefined): element is SlideElement & { kind: 'text' | 'shape' } => element?.kind === 'text' || element?.kind === 'shape'
+
+/** The table cell drawn under an event's target. */
+function cellAt(target: EventTarget | null): CellRef | null {
+  const cell = target instanceof Element ? target.closest('[data-row][data-column]') : null
+
+  return cell ? { row: Number(cell.getAttribute('data-row')), column: Number(cell.getAttribute('data-column')) } : null
+}
 
 export function Stage({ doc, onContextMenu }: { doc: SlidesDocument; onContextMenu?: (at: { x: number; y: number }) => void }) {
   useDeck(doc)
@@ -181,7 +190,7 @@ export function Stage({ doc, onContextMenu }: { doc: SlidesDocument; onContextMe
         doc.select([id])
       }
 
-      gesture.current = { kind: 'press', id, wasSelected: wasSelected && !event.shiftKey && !event.metaKey, start: point, client: [event.clientX, event.clientY], duplicate: event.altKey }
+      gesture.current = { kind: 'press', id, wasSelected: wasSelected && !event.shiftKey && !event.metaKey, start: point, client: [event.clientX, event.clientY], duplicate: event.altKey, cell: cellAt(target) }
       capture()
 
       return
@@ -283,6 +292,9 @@ export function Stage({ doc, onContextMenu }: { doc: SlidesDocument; onContextMe
       if (done.wasSelected && doc.selected.length === 1 && isTextual(element)) {
         requestEditStart({ elementId: done.id, point: { x: done.client[0], y: done.client[1] }, select: 'caret' })
         doc.edit(done.id)
+      } else if (done.wasSelected && doc.selected.length === 1 && element?.kind === 'table' && done.cell) {
+        requestEditStart({ elementId: done.id, point: { x: done.client[0], y: done.client[1] }, select: 'caret' })
+        doc.goToCell(done.id, done.cell, true)
       } else if (done.wasSelected && element && element.kind === 'image' && isEmptyPlaceholder(element)) {
         commands.pickPictures(doc)
       }
@@ -307,8 +319,13 @@ export function Stage({ doc, onContextMenu }: { doc: SlidesDocument; onContextMe
       return
     }
 
-    if (session?.elementId === element.id) {
+    const cell = element.kind === 'table' ? cellAt(event.target) : null
+
+    if (session?.elementId === element.id && (!cell || (cell.row === doc.cell?.row && cell.column === doc.cell.column))) {
       selectWordAt(session.editor, event.clientX, event.clientY)
+    } else if (cell) {
+      requestEditStart({ elementId: element.id, point: { x: event.clientX, y: event.clientY }, select: 'word' })
+      doc.goToCell(element.id, cell, true)
     } else if (isTextual(element)) {
       requestEditStart({ elementId: element.id, point: { x: event.clientX, y: event.clientY }, select: 'word' })
       doc.edit(element.id)
@@ -376,7 +393,14 @@ export function Stage({ doc, onContextMenu }: { doc: SlidesDocument; onContextMe
   }
 
   const editingId = doc.editing
-  const editing: EditingSlot | null = editingId ? { id: editingId, render: (body) => <TextEditor key={editingId} doc={doc} slideId={slide.id} elementId={editingId} body={body} theme={deck.theme} /> } : null
+  const cell = editingId ? doc.cell : null
+  const editing: EditingSlot | null = editingId
+    ? {
+        id: editingId,
+        cell,
+        render: (body) => <TextEditor key={cell ? `${editingId}:${cell.row}:${cell.column}` : editingId} doc={doc} slideId={slide.id} elementId={editingId} cell={cell} onTab={(by) => commands.moveCell(by, doc)} body={body} theme={deck.theme} />
+      }
+    : null
   const editingElement = editingId ? (findElement(slide, editingId) ?? null) : null
 
   return (
@@ -398,6 +422,13 @@ export function Stage({ doc, onContextMenu }: { doc: SlidesDocument; onContextMe
 
         if (id && !doc.selected.includes(id)) {
           doc.select([id])
+        }
+
+        const cell = cellAt(event.target)
+
+        // The table's row and column commands act on the cell clicked, unless it is being typed in.
+        if (id && cell && doc.editing !== id && findElement(doc.slide, id)?.kind === 'table') {
+          doc.goToCell(id, cell)
         }
 
         const rect = scroller.current?.getBoundingClientRect()

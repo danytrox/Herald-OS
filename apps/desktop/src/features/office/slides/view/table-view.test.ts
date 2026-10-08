@@ -38,4 +38,17 @@ describe('a table on a slide', () => {
     expect(html).toContain(`background-color:${DEFAULT_THEME.colors.accent1};outline:1px solid ${DEFAULT_THEME.colors.bg1};outline-offset:-0.5px`)
     expect(html).toMatch(/<span[^>]*>Name<\/span>/)
   })
+
+  it('draws the text editor in the cell being typed into, and the other cells as they are', () => {
+    const start = model.newDeck('Plan')
+    const slideId = start.slides[0].id
+    const { deck, elementId } = model.addTable(start, slideId, { rows: 2, columns: 2, cells: [['a', 'b'], ['c', 'd']] })
+    const editing = { id: elementId, cell: { row: 1, column: 0 }, render: () => createElement('i', { 'data-typing': '' }) }
+    const html = renderToStaticMarkup(createElement(SlideView, { deck, slide: findSlide(deck, slideId)!, scale: 1, mode: 'edit', editing }))
+
+    expect(html).toMatch(/data-row="1" data-column="0"[^>]*><i data-typing="">/)
+    expect(html.match(/data-typing/g)).toHaveLength(1)
+    expect(html).not.toMatch(/<span[^>]*>c<\/span>/)
+    expect(html).toMatch(/<span[^>]*>d<\/span>/)
+  })
 })

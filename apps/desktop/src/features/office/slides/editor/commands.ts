@@ -14,11 +14,13 @@ import type {
   SlideElement,
   SlideSize,
   Stroke,
+  TableElement,
   TextAlign,
   TextBody,
   Theme,
   Transition
 } from '../deck.ts'
+import { findElement } from '../deck.ts'
 import type { SlidesDocument } from '../document.ts'
 import { lineElement, shapeElement, textElement } from '../elements.ts'
 import * as model from '../model.ts'
@@ -26,6 +28,7 @@ import type { DeckChange } from '../model.ts'
 import { normalizeDeck } from '../normalize.ts'
 import { startPresenting } from '../Present.tsx'
 import { decks, slidesSession } from '../store.ts'
+import { type CellRef, cellUnder, fillCells, nextCell, tableText } from '../tables.ts'
 import { allRuns, effectiveStyle, paragraphsAll, styleAll, textBody, withParagraph } from '../text.ts'
 import { $textSession, flushTyping, requestEditStart, textSessionOf } from './active.ts'
 import { changeParagraphs, selectedParagraphs, shiftLevel, toggleList } from './tiptap.ts'
@@ -44,7 +47,7 @@ export const live = (): SlidesDocument | undefined => {
 }
 
 /** Make a change to the deck in front (or `doc`) as one step; nothing when it changes nothing. */
-export function change(make: (deck: Deck, doc: SlidesDocument) => DeckChange | null | undefined, doc = live()): DeckChange | null {
+export function change<T extends DeckChange>(make: (deck: Deck, doc: SlidesDocument) => T | null | undefined, doc = live()): T | null {
   if (!doc) {
     return null
   }
@@ -61,15 +64,40 @@ export function change(make: (deck: Deck, doc: SlidesDocument) => DeckChange | n
 
 const editing = (doc = live()) => textSessionOf(doc)
 
-/** Text and shape elements among the selection, which formatting applies to. */
-const textTargets = (doc: SlidesDocument): (SlideElement & { body: TextBody })[] => doc.selection.filter((element): element is SlideElement & { body: TextBody } => element.kind === 'text' || element.kind === 'shape')
+/** The text bodies formatting applies to among the selection: text boxes' and shapes', and every cell of a table. */
+const textBodies = (doc: SlidesDocument): TextBody[] =>
+  doc.selection.flatMap((element) => (element.kind === 'text' || element.kind === 'shape' ? [element.body] : element.kind === 'table' ? element.cells.flat().flatMap((cell) => (cell.merged ? [] : [cell.body])) : []))
+
+/** An element with each of its text bodies changed. */
+function withBodies(element: SlideElement, edit: (body: TextBody) => TextBody): SlideElement {
+  if (element.kind === 'text' || element.kind === 'shape') {
+    return { ...element, body: edit(element.body) }
+  }
+
+  return element.kind === 'table' ? { ...element, cells: element.cells.map((row) => row.map((cell) => (cell.merged ? cell : { ...cell, body: edit(cell.body) }))) } : element
+}
 
 function changeBodies(label: string, edit: (body: TextBody) => TextBody, doc = live()): void {
   change((deck, d) => {
-    const ids = textTargets(d).map((element) => element.id)
+    const ids = d.selection.filter((element) => element.kind === 'text' || element.kind === 'shape' || element.kind === 'table').map((element) => element.id)
 
-    return ids.length ? model.updateElements(deck, d.slideId, ids, (element) => (element.kind === 'text' || element.kind === 'shape' ? { ...element, body: edit(element.body) } : element), label) : null
+    return ids.length ? model.updateElements(deck, d.slideId, ids, (element) => withBodies(element, edit), label) : null
   }, doc)
+}
+
+/** The selected table, when the selection is one table. */
+function selectedTable(doc: SlidesDocument | undefined): TableElement | null {
+  const [only] = doc?.selection ?? []
+
+  return doc?.selected.length === 1 && only?.kind === 'table' ? only : null
+}
+
+/** The text of the selected table's cell being typed into. */
+function typingCellBody(doc: SlidesDocument): TextBody | undefined {
+  const table = selectedTable(doc)
+  const cell = doc.editing ? doc.cell : null
+
+  return table && cell ? table.cells[cell.row][cell.column].body : undefined
 }
 
 export const notify = (message: string): void => slidesSession.notify(message, 'error')
@@ -160,6 +188,137 @@ export function insertLine(end: ArrowHead = 'none'): void {
   const { width, height } = doc.deck.size
   const element = lineElement([width / 2 - 140, height / 2], [width / 2 + 140, height / 2], { end })
   change((deck) => model.insertElements(deck, doc.slideId, [element], end === 'none' ? 'New Line' : 'New Arrow'), doc)
+}
+
+/** A table of `rows` by `columns` in the middle of the slide, typing in its first cell, as PowerPoint inserts one; its id. */
+export function insertTable(rows: number, columns: number, doc = live()): string | null {
+  const added = doc ? change((deck) => model.addTable(deck, doc.slideId, { rows, columns }), doc) : null
+
+  if (!doc || !added) {
+    return null
+  }
+
+  requestEditStart({ elementId: added.elementId, select: 'end' })
+  doc.goToCell(added.elementId, { row: 0, column: 0 }, true)
+
+  return added.elementId
+}
+
+/** Start typing into a cell of the selected table (rows and columns count from 0; a covered cell is typed into as the merged cell over it). */
+export function editCell(row: number, column: number, select: 'end' | 'all' = 'end', doc = live()): void {
+  const table = selectedTable(doc)
+
+  if (!doc || !table || !table.cells[row]?.[column]) {
+    return
+  }
+
+  textSessionOf(doc)?.finish()
+  requestEditStart({ elementId: table.id, select })
+  doc.goToCell(table.id, cellUnder(table, { row, column }), true)
+}
+
+/** Typing moves to the next cell of the selected table, or back one; past the last cell a new row comes first, as in PowerPoint. */
+export function moveCell(by: 1 | -1, doc = live()): void {
+  const table = selectedTable(doc)
+  const cell = doc?.cell
+
+  if (!doc || !table || !cell) {
+    return
+  }
+
+  let next = nextCell(table, cell, by)
+
+  if (!next && by < 0) {
+    return
+  }
+
+  textSessionOf(doc)?.finish()
+
+  if (!next) {
+    change((deck) => model.insertTableRow(deck, doc.slideId, table.id, table.rows.length - 1, 'below'), doc)
+    const grown = findElement(doc.slide, table.id)
+    next = grown?.kind === 'table' && grown.rows.length > table.rows.length ? { row: table.rows.length, column: 0 } : cell
+  }
+
+  requestEditStart({ elementId: table.id, select: 'all' })
+  doc.goToCell(table.id, next, true)
+}
+
+/**
+ * A change to the selected table about its current cell, as one step: `make` gives the change and
+ * the cell to be in afterwards. Typing in the table ends first and goes on in that cell.
+ */
+function changeAtCell(doc: SlidesDocument | undefined, make: (deck: Deck, slideId: string, table: TableElement, cell: CellRef | null) => { change: DeckChange; cell: CellRef | null } | null): void {
+  const table = selectedTable(doc)
+
+  if (!doc || !table) {
+    return
+  }
+
+  const cell = doc.cell
+  const typing = doc.editing === table.id && Boolean(textSessionOf(doc))
+  textSessionOf(doc)?.finish()
+  const deck = doc.history.present
+  const made = make(deck, doc.slideId, model.requireTable(deck, doc.slideId, table.id), cell)
+
+  if (!made) {
+    return
+  }
+
+  change(() => made.change, doc)
+  const after = findElement(doc.slide, table.id)
+  const at = made.change.deck === deck ? cell : made.cell
+
+  if (after?.kind === 'table' && at) {
+    if (typing) {
+      requestEditStart({ elementId: table.id, select: 'end' })
+    }
+
+    doc.goToCell(table.id, cellUnder(after, at), typing)
+  }
+}
+
+const reachOf = (table: TableElement, cell: CellRef) => ({ rows: table.cells[cell.row][cell.column].rowSpan ?? 1, columns: table.cells[cell.row][cell.column].colSpan ?? 1 })
+
+/** A new row above or below the selected table's current cell (above the first row or below the last without one). */
+export function insertRow(where: 'above' | 'below', doc = live()): void {
+  changeAtCell(doc, (deck, slideId, table, cell) => {
+    const row = cell ? (where === 'above' ? cell.row : cell.row + reachOf(table, cell).rows - 1) : where === 'above' ? 0 : table.rows.length - 1
+
+    return { change: model.insertTableRow(deck, slideId, table.id, row, where), cell: cell && where === 'above' ? { ...cell, row: cell.row + 1 } : cell }
+  })
+}
+
+/** A new column left or right of the selected table's current cell (left of the first column or right of the last without one). */
+export function insertColumn(where: 'left' | 'right', doc = live()): void {
+  changeAtCell(doc, (deck, slideId, table, cell) => {
+    const column = cell ? (where === 'left' ? cell.column : cell.column + reachOf(table, cell).columns - 1) : where === 'left' ? 0 : table.columns.length - 1
+
+    return { change: model.insertTableColumn(deck, slideId, table.id, column, where), cell: cell && where === 'left' ? { ...cell, column: cell.column + 1 } : cell }
+  })
+}
+
+/** Delete the rows the selected table's current cell is in; the table goes with its last row. */
+export function deleteRows(doc = live()): void {
+  changeAtCell(doc, (deck, slideId, table, cell) => (cell ? { change: model.removeTableRows(deck, slideId, table.id, Array.from({ length: reachOf(table, cell).rows }, (_, k) => cell.row + k)), cell } : null))
+}
+
+/** Delete the columns the selected table's current cell is in; the table goes with its last column. */
+export function deleteColumns(doc = live()): void {
+  changeAtCell(doc, (deck, slideId, table, cell) => (cell ? { change: model.removeTableColumns(deck, slideId, table.id, Array.from({ length: reachOf(table, cell).columns }, (_, k) => cell.column + k)), cell } : null))
+}
+
+/** Whether the selection is one table with a current cell, for the row and column commands that need one. */
+export const hasTableCell = (doc = live()): boolean => Boolean(selectedTable(doc) && doc?.cell)
+
+/** A fill for cells of the selected table: those given, or else the cell being typed into, or else every cell. */
+export function setCellFill(fill: Fill | null, cells?: readonly CellRef[] | 'all', doc = live()): void {
+  const table = selectedTable(doc)
+  const typing = doc?.editing === table?.id ? doc?.cell : null
+
+  if (doc && table) {
+    change((deck) => model.setCellFill(deck, doc.slideId, table.id, cells ?? (typing ? [typing] : 'all'), fill), doc)
+  }
 }
 
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif'])
@@ -257,12 +416,12 @@ export const distributeSelection = (axis: 'horizontal' | 'vertical') => change((
 
 export const nudgeSelection = (dx: number, dy: number) => change((deck, doc) => (doc.selected.length ? model.nudge(deck, doc.slideId, doc.selected, dx, dy) : null))
 
-/** Start typing into the selected text box or shape. */
+/** Start typing into the selected text box or shape, or the selected table's current cell. */
 export function editSelection(select: 'end' | 'all' = 'end'): void {
   const doc = live()
   const [only] = doc?.selection ?? []
 
-  if (doc && only && doc.selected.length === 1 && (only.kind === 'text' || only.kind === 'shape')) {
+  if (doc && only && doc.selected.length === 1 && (only.kind === 'text' || only.kind === 'shape' || only.kind === 'table')) {
     requestEditStart({ elementId: only.id, select })
     doc.edit(only.id)
   }
@@ -270,7 +429,16 @@ export function editSelection(select: 'end' | 'all' = 'end'): void {
 
 export const changeSelected = (label: string, edit: (element: SlideElement) => SlideElement) => change((deck, doc) => (doc.selected.length ? model.updateElements(deck, doc.slideId, doc.selected, edit, label) : null))
 
-export const setFill = (fill: Fill | null) => changeSelected('Fill', (element) => (element.kind === 'shape' || element.kind === 'text' ? { ...element, fill } : element))
+/** A fill for shapes and text boxes, and for a table the cell being typed into or else every cell. */
+export function setFill(fill: Fill | null, doc = live()): void {
+  change((deck, d) => {
+    const typing = d.editing ? d.cell : null
+    const fillOf = (element: SlideElement): SlideElement =>
+      element.kind === 'shape' || element.kind === 'text' ? { ...element, fill } : element.kind === 'table' ? fillCells(element, typing && d.editing === element.id ? [typing] : 'all', fill) : element
+
+    return d.selected.length ? model.updateElements(deck, d.slideId, d.selected, fillOf, 'Fill') : null
+  }, doc)
+}
 
 /** The outline of shapes, text boxes and pictures, and the stroke of lines (which always have one). */
 export function setStroke(patch: Partial<Stroke> | null): void {
@@ -312,7 +480,7 @@ export function toggleSwitch(key: Switch): void {
     return
   }
 
-  const on = !textTargets(doc).every((element) => allRuns(element.body, key, true))
+  const on = !textBodies(doc).every((body) => allRuns(body, key, true))
   changeBodies(SWITCH_LABELS[key], (body) => styleAll(body, { [key]: on }), doc)
 }
 
@@ -401,7 +569,7 @@ export function toggleListKind(kind: ListKind): void {
     return
   }
 
-  const all = textTargets(doc).every((element) => element.body.paragraphs.every((paragraph) => paragraph.list === kind))
+  const all = textBodies(doc).every((body) => body.paragraphs.every((paragraph) => paragraph.list === kind))
   changeBodies(kind === 'bullet' ? 'Bullets' : 'Numbering', (body) => ({ ...body, paragraphs: body.paragraphs.map((paragraph) => withParagraph(paragraph, all ? { list: undefined, level: undefined } : { list: kind })) }), doc)
 }
 
@@ -453,8 +621,7 @@ export interface Format {
 /** The formatting of the text being edited at its selection, or of the first selected box. */
 export function currentFormat(doc = live()): Format {
   const session = textSessionOf(doc)
-  const element = doc?.selection.find((entry): entry is SlideElement & { body: TextBody } => entry.kind === 'text' || entry.kind === 'shape')
-  const body = element?.body ?? textBody({ font: '+body', size: 18, color: 'tx1' })
+  const body = (doc && ((session ? typingCellBody(doc) : undefined) ?? textBodies(doc)[0])) ?? textBody({ font: '+body', size: 18, color: 'tx1' })
 
   if (session) {
     const { editor } = session
@@ -495,7 +662,7 @@ export function currentFormat(doc = live()): Format {
 }
 
 /** Whether text formatting has anything to work on. */
-export const canFormatText = (doc = live()): boolean => Boolean($textSession.get()?.doc === doc && doc) || Boolean(doc && textTargets(doc).length)
+export const canFormatText = (doc = live()): boolean => Boolean($textSession.get()?.doc === doc && doc) || Boolean(doc && textBodies(doc).length)
 
 const CLIPBOARD_TYPE = 'application/x-herald-slides'
 
@@ -508,7 +675,13 @@ export function copySelection(data: DataTransfer, doc = live()): boolean {
   }
 
   data.setData(CLIPBOARD_TYPE, JSON.stringify({ elements: chosen }))
-  data.setData('text/plain', chosen.map((element) => (element.kind === 'text' || element.kind === 'shape' ? element.body.paragraphs.map((paragraph) => paragraph.runs.map((run) => run.text).join('')).join('\n') : '')).filter(Boolean).join('\n\n'))
+  data.setData(
+    'text/plain',
+    chosen
+      .map((element) => (element.kind === 'text' || element.kind === 'shape' ? element.body.paragraphs.map((paragraph) => paragraph.runs.map((run) => run.text).join('')).join('\n') : element.kind === 'table' ? tableText(element) : ''))
+      .filter(Boolean)
+      .join('\n\n')
+  )
 
   return true
 }
