@@ -1,5 +1,6 @@
 import { IconCheck } from '@tabler/icons-react'
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '../../../../lib/cn.ts'
 import type { Color, Deck, FontRef, LayoutId, Slide, Theme } from '../deck.ts'
 import { LAYOUTS, SLOTS } from '../deck.ts'
@@ -10,12 +11,16 @@ import { SlideView } from '../view/SlideView.tsx'
 /*
  * The formatting bar's pop-up choosers: colours (the theme's slots first, so a colour follows the
  * theme), fonts (the theme's, then the computer's), sizes, layouts and themes, each drawn as it
- * will look. They live inside the bar, so picking from them keeps the text being typed into.
+ * will look. They are marked like the bar, so picking from them keeps the text being typed into.
  */
 
-/** A pop-up under its button; closes on Escape and on a press outside both. */
+/**
+ * A pop-up under its button; closes on Escape and on a press outside both. It is drawn over the
+ * window, since the bar scrolls sideways and so would clip anything hanging below it.
+ */
 export function Popover({ open, onClose, anchor, children, className, align = 'left' }: { open: boolean; onClose: () => void; anchor: React.RefObject<HTMLElement | null>; children: ReactNode; className?: string; align?: 'left' | 'right' }) {
   const panel = useRef<HTMLDivElement>(null)
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null)
 
   useEffect(() => {
     if (!open) {
@@ -44,14 +49,41 @@ export function Popover({ open, onClose, anchor, children, className, align = 'l
     }
   }, [open, onClose, anchor])
 
+  useLayoutEffect(() => {
+    if (!open) {
+      return
+    }
+
+    const place = () => {
+      const box = anchor.current?.getBoundingClientRect()
+      const self = panel.current
+
+      if (!box || !self) {
+        return
+      }
+
+      const left = align === 'right' ? box.right - self.offsetWidth : box.left
+      setAt({ left: Math.max(8, Math.min(left, window.innerWidth - self.offsetWidth - 8)), top: Math.max(8, Math.min(box.bottom + 4, window.innerHeight - self.offsetHeight - 8)) })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open, anchor, align])
+
   if (!open) {
     return null
   }
 
-  return (
-    <div ref={panel} role="dialog" className={cn('float menu-surface absolute top-full z-40 mt-1 rounded-xl p-2 animate-pop', align === 'right' ? 'right-0' : 'left-0', className)} onMouseDown={(event) => event.preventDefault()}>
+  return createPortal(
+    <div ref={panel} role="dialog" data-slides-keep-editing="" className={cn('float menu-surface fixed z-50 rounded-xl p-2 animate-pop', className)} style={at ?? { left: 0, top: 0, visibility: 'hidden' }} onMouseDown={(event) => event.preventDefault()}>
       {children}
-    </div>
+    </div>,
+    document.body
   )
 }
 
