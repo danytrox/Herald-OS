@@ -135,7 +135,16 @@
       "!**/node_modules/@univerjs/**",
       "!**/node_modules/@grpc/**",
       "!**/node_modules/rxjs/**",
-      "!**/node_modules/lodash-es/**"
+      "!**/node_modules/lodash-es/**",
+      "!**/node_modules/@tiptap/**",
+      "!**/node_modules/prosemirror-*/**",
+      "!**/node_modules/{orderedmap,rope-sequence,w3c-keyname,linkifyjs,fast-equals}/**",
+      "!**/node_modules/@floating-ui/**",
+      "!**/node_modules/{mdast-util-*,micromark*}/**",
+      "!**/node_modules/{exceljs,@fast-csv,fast-csv,archiver,archiver-utils,unzipper,dayjs,saxes,xmlchars,async,bluebird}/**",
+      "!**/node_modules/{docx,xml-js,xml,hash.js}/**",
+      "!**/node_modules/{pptxgenjs,image-size,queue}/**",
+      "!**/node_modules/{jszip,lie,setimmediate}/**"
     ],
     "extraResources": [
       {

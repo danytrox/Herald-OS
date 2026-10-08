@@ -536,10 +536,12 @@ themselves go through the command registry (ADR-014).
   formats stay off in the format table (`shared/office/files.ts`).
 - **Licences.** Univer is Apache-2.0: NOTICE names it and a packaged build carries its licence
   text. electron-builder would also copy Univer's npm packages into `app.asar` (148 MB the renderer
-  bundle already contains), so the build leaves them out. TipTap, ProseMirror, ExcelJS, docx,
-  PptxGenJS and JSZip are MIT (JSZip, licensed MIT or GPL-3.0, is used under MIT). JSZip brings
-  pako, which is MIT and Zlib; the zlib licence is permissive, and Herald already ships pako with
-  Herald Canvas. Everything else they bring in is MIT, Apache-2.0, ISC or BSD: ExcelJS's old
+  bundle already contains), so the build leaves them out, and the Office apps' other libraries too
+  (TipTap and ProseMirror, ExcelJS, docx, PptxGenJS, JSZip, the Markdown parsers and what only
+  they bring in): 58 MB less in `app.asar`, which main never loads. TipTap, ProseMirror, ExcelJS,
+  docx, PptxGenJS and JSZip are MIT (JSZip, licensed MIT or GPL-3.0, is used under MIT). JSZip
+  brings pako, which is MIT and Zlib; the zlib licence is permissive, and Herald already ships pako
+  with Herald Canvas. Everything else they bring in is MIT, Apache-2.0, ISC or BSD: ExcelJS's old
   unzipper is pinned to the 0.12 line and its uuid to 11.1.1, so npm audit finds nothing new.
 
 Alternatives considered:
