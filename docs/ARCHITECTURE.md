@@ -199,6 +199,15 @@ with the formats in `shared/office` and file access in `electron/office`.
 - **Slides** keeps its own deck (`slides/deck.ts`) and draws each slide with the Herald Canvas
   engine at the size it is shown (`slides/render.ts`): the editor, the slide list, present mode and
   PDF export all draw this way.
+- **Hermes** works through the `docs.*`, `sheets.*` and `office.list` commands (`src/commands/docs.ts`,
+  `sheets.ts`, `office.ts`), which find their document in `features/office/agent.ts`: open in this
+  window, the change is one transaction (Docs) or one Univer undo group (Sheets), so it is one step
+  to undo and saves the way the person's edits do; a file that is not open is changed and written
+  back only when Herald keeps everything in it. In panels mode each Office app is its own window, and
+  main relays a command from the Hermes window to the window that has the document open
+  (`officeRun`). Each window's report carries its documents' selections, which `office.list`, the
+  `os_ui` state and spoken requests pass on to Hermes. An Ask Hermes request marks the text it is
+  about (`docs/marked.ts`), so the answer lands there even after the person clicks elsewhere.
 - **Main** reads and writes files whole and atomically, watches each open file's folder with a poll
   as a safety net (`file-watch.ts`), keeps what each window has open for Hermes, prints PDFs, and
   can convert OpenDocument files through headless LibreOffice when it is installed (`convert.ts`);
