@@ -59,8 +59,8 @@ async function reading(target: Local<DocJSON>): Promise<Reading> {
     return { name: baseName(target.path), path: target.path, state: stateOf((await readFile(target.path)).model), live: false, marked: null }
   }
 
+  // Reading leaves a closed window closed: without an editor, the document as it was last held.
   const { doc } = target
-  await withEditor('docs', doc)
   const editor = editorOf(doc.key)
   const state = editor?.state ?? stateOf(doc.editor?.snapshot() ?? doc.initial)
 

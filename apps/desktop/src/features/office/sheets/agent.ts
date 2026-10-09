@@ -66,8 +66,13 @@ async function onWorkbook<T>(target: Local<WorkbookSnapshot>, work: (on: SheetsT
     return { result, name: baseName(file), path: file, docKey: null }
   }
 
+  // Only a change brings a closed window back, so the person sees it land as a step they can undo.
   const { doc } = target
-  await withEditor('sheets', doc)
+
+  if (change) {
+    await withEditor('sheets', doc)
+  }
+
   const live = liveTarget(doc.key)
 
   if (live) {
