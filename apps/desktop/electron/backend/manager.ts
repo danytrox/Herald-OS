@@ -266,14 +266,18 @@ export class BackendManager {
       // this flag; Herald OS spawns and owns the backend exactly the way Desktop does.
       HERMES_DESKTOP: '1',
       HERALD_OS: '1',
-      HERMES_PARENT_PID: String(process.pid),
+      // Upstream's parent-death watchdog (HERMES_PARENT_PID) is unreliable on Windows: with no
+      // start marker it falls back to PID liveness, and behind the `hermes.exe` launcher shim it
+      // can read the Electron PID as gone and kill a healthy backend ("desktop PID appears
+      // orphaned"). Herald OS reaps its own backend on quit, so disable the watchdog on Windows
+      // by omitting the PID.
+      HERMES_PARENT_PID: process.platform === 'win32' ? undefined : String(process.pid),
       // Remove parent-identity markers inherited from an outer Hermes session
       // (the app may have been launched from a running Hermes CLI or Desktop
       // shell). A leaked HERMES_PARENT_START_MARKER + HERMES_PARENT_NONCE pairs
       // with the marker-parsing watchdog in upstream web_server_lifecycle.py:
       // the backend would conclusively decide "parent replaced" against the
-      // real Electron PID and exit immediately after setup.ready. With no
-      // marker, the watchdog degrades to plain PID liveness, which is safe.
+      // real Electron PID and exit immediately after setup.ready.
       HERMES_PARENT_START_MARKER: undefined,
       HERMES_PARENT_NONCE: undefined,
       HERMES_SPAWN: undefined,
