@@ -9,6 +9,13 @@ const FALLBACK_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'
  * expect the user's login-shell PATH, so ask the login shell once and merge with sane fallbacks.
  */
 export async function loginShellPath(timeoutMs = 4000): Promise<string> {
+  // Windows has no login-shell PATH to ask for; a GUI app's own PATH already carries System32 and
+  // the user's additions. Asking for `/bin/bash` would only add a delay and a POSIX dir it may not
+  // even have.
+  if (process.platform === 'win32') {
+    return process.env.PATH ?? ''
+  }
+
   const shell = process.env.SHELL || (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash')
   const fromShell = await new Promise<string>(resolve => {
     const child = execFile(shell, ['-lc', 'printf "%s" "$PATH"'], { timeout: timeoutMs }, (error, stdout) => {

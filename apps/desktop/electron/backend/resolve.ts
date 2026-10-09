@@ -64,5 +64,13 @@ export function resolveBackendRuntime(): BackendRuntime | null {
     return managed
   }
 
-  return pathRuntime([path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin'])
+  // Windows GUI apps inherit a minimal PATH that lacks the Hermes shim dir; add it explicitly.
+  // The managed install on Windows ships `hermes.exe` under <hermes-home>/hermes-agent/.hermes/bin
+  // (no `venv/`), so the `checkoutRuntime` rung above misses it and the PATH rung must catch it.
+  const extraDirs =
+    process.platform === 'win32'
+      ? [path.join(hermesHome(), 'hermes-agent', '.hermes', 'bin')]
+      : [path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin']
+
+  return pathRuntime(extraDirs)
 }

@@ -154,6 +154,13 @@ export class OsControlServer {
   ) {}
 
   start(): void {
+    // Windows has no AF_UNIX sockets; the shell still boots and the os_ui bridge simply reports
+    // "not running this session" to the agent instead of listening on a filesystem path.
+    if (process.platform === 'win32') {
+      log('os-control', 'control socket is not supported on Windows; the os_ui bridge is unavailable')
+      return
+    }
+
     try {
       fs.mkdirSync(path.dirname(this.socketPath), { recursive: true, mode: 0o700 })
       fs.unlinkSync(this.socketPath)

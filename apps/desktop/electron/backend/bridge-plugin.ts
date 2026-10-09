@@ -135,7 +135,9 @@ export async function ensureBridgePlugin(runtime: BackendRuntime, resources: str
     if (plan !== 'keep') {
       fs.mkdirSync(path.dirname(link), { recursive: true })
       fs.rmSync(link, { force: true })
-      fs.symlinkSync(bundled, link)
+      // Windows cannot symlink a directory without a junction (file symlinks need Developer Mode
+      // or elevation); junctions work for folders without either.
+      fs.symlinkSync(bundled, link, process.platform === 'win32' ? 'junction' : undefined)
       log('bridge', `${plan === 'create' ? 'linked' : 'relinked'} ${link} -> ${bundled}`)
     }
   } catch (error) {

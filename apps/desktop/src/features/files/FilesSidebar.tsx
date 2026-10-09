@@ -6,6 +6,7 @@ import { LinkAction, ProgressBar } from '../../components/ui/glass.tsx'
 import { cn } from '../../lib/cn.ts'
 import { formatBytes } from '../../lib/format.ts'
 import { useLocalData } from '../../lib/use-async.ts'
+import { hostPlatform } from '../../lib/platform-labels.ts'
 import { useSystemStats } from '../../store/system.ts'
 import { openApp } from '../../store/windows.ts'
 import { $home, $location, DRAG_MIME, type Location, moveItem, navigate, sameLocation } from './files-store.ts'
@@ -25,11 +26,15 @@ async function namesIn(dir: string): Promise<Set<string>> {
   }
 }
 
-/** Resolve the well-known folders for this Mac; anything missing falls back sensibly or is dropped. */
+/** Resolve the well-known folders for this machine; anything missing falls back sensibly or is dropped. */
 async function resolvePlaces(home: string): Promise<Place[]> {
-  const [homeNames, mobileDocs] = await Promise.all([namesIn(home), namesIn(`${home}/Library/Mobile Documents`)])
+  const isMac = hostPlatform() === 'darwin'
+  const homeNames = await namesIn(home)
+  // iCloud's "Mobile Documents" and the per-user `~/.Trash` are macOS-only; Windows and Linux have
+  // neither, so look for them only where they exist.
+  const mobileDocs = isMac ? await namesIn(`${home}/Library/Mobile Documents`) : new Set<string>()
   const projects = homeNames.has('Projects') ? `${home}/Projects` : homeNames.has('Apps') ? `${home}/Apps` : home
-  const shared = mobileDocs.has('com~apple~CloudDocs') ? `${home}/Library/Mobile Documents/com~apple~CloudDocs` : homeNames.has('Public') ? `${home}/Public` : null
+  const shared = isMac && mobileDocs.has('com~apple~CloudDocs') ? `${home}/Library/Mobile Documents/com~apple~CloudDocs` : homeNames.has('Public') ? `${home}/Public` : null
   const places: Place[] = [
     { id: 'recent', label: 'Recent', icon: <IconClock />, location: { kind: 'recent' } },
     { id: 'favorites', label: 'Favorites', icon: <IconStar />, location: { kind: 'favorites' } },
@@ -41,7 +46,9 @@ async function resolvePlaces(home: string): Promise<Place[]> {
     places.push({ id: 'shared', label: 'Shared', icon: <IconUsers />, location: { kind: 'dir', path: shared } })
   }
 
-  places.push({ id: 'trash', label: 'Trash', icon: <IconTrash />, location: { kind: 'dir', path: `${home}/.Trash` } })
+  if (isMac) {
+    places.push({ id: 'trash', label: 'Trash', icon: <IconTrash />, location: { kind: 'dir', path: `${home}/.Trash` } })
+  }
 
   return places
 }
