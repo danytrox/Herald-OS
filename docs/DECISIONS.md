@@ -417,8 +417,7 @@ Compositor lacks. What only Herald has goes in fields of its own beside a record
 ## ADR-021: Herald Office: Sheets on Univer, Docs on TipTap, Slides on a slide editor of its own
 
 **Status: Proposed.** Rewritten for what Herald Office's second phase built; it becomes final once
-Herald Slides has merged and the three apps have shipped. Herald Slides is still being finished,
-so its part below describes the design it is being built to.
+the three apps have shipped.
 
 Herald OS needs documents, spreadsheets and presentations that Hermes can work in while the person
 watches, and that open and save the files people already have. Herald Docs, Herald Sheets and
@@ -471,10 +470,10 @@ themselves go through the command registry (ADR-014).
   file's JSON with the same code, one transaction and one step to undo. TipTap was chosen over
   Univer Docs for native editing in the page (Chromium's spellcheck with suggestions on
   right-click, input methods, and copy and paste with other apps), a schema usable without a
-  window, a far smaller bundle (the Docs window is a 0.53 MB chunk, 0.17 MB compressed, against
-  3.1 MB and 0.85 MB for Univer Docs), and the maintainer's good experience with a TipTap-based
-  editor. Only TipTap's open-source packages are used, at 3.31.4: none of its paid extensions or
-  cloud services.
+  window, a far smaller bundle (the Docs window loads 0.53 MB, 0.17 MB compressed, against 3.1 MB
+  and 0.85 MB for Univer Docs; 0.33 MB of it is TipTap and ProseMirror, shared with Slides), and
+  the maintainer's good experience with a TipTap-based editor. Only TipTap's open-source packages
+  are used, at 3.31.4: none of its paid extensions or cloud services.
 - **Word files through a reader of our own and the docx package.** A `.docx` (or a `.docm`,
   without its macros) is read by Herald's own WordprocessingML reader through JSZip (MIT): styles
   with their basedOn chains and the theme's fonts, run and paragraph formatting, lists from
@@ -487,21 +486,48 @@ themselves go through the command registry (ADR-014).
   draws one sheet of paper at the page's width and margins that grows with the text, keeps the
   page breaks a document has, and leaves paging to Chromium when it prints; a file's headers and
   footers are named in the fidelity report rather than kept.
-- **Herald Slides on a DOM slide editor of its own.** Univer Slides' open-source packages are a
-  skeleton with no Facade API: in 1.0.3 a new slide does not appear in the slide list, moving an
-  element does nothing, slide edits cannot be undone, and there is no present mode, layouts or
-  themes. The Herald Canvas engine of the first draft drew slides well but could not edit rich
-  text. Slides are drawn in the page instead, in points on a fixed 16:9 or 4:3 surface scaled to
-  fit, by one view for the editor, the slide list, presenting and PDF export, with text boxes and
-  shapes editing rich text through TipTap. Decks are written as `.pptx` with PptxGenJS (MIT) and a
-  finishing pass for what it cannot say, and read with JSZip and Herald's own DrawingML reader.
-  Herald's deck JSON goes into the file as a part of its own, with its content type and
-  relationship, so Herald reopens its files exactly while other apps pass over it; when the slides
-  have changed since Herald wrote them, Herald reads the slides instead.
+- **Herald Slides on a DOM slide editor of its own, with PowerPoint's model.** A deck is
+  PowerPoint's model in Herald's JSON: slides in points on a fixed 16:9 or 4:3 surface, layouts
+  with placeholders, themes of ten colour slots with a heading and a body font, shapes as
+  DrawingML's presets with their adjust values, pictures, speaker notes, and tables as PowerPoint
+  builds them (a cell for every column in every row, merged cells kept whole, rows that grow with
+  their text, no rotation). The page draws it with the DOM, scaled to fit, through one view for the
+  editor, the slide list, presenting and PDF export, so a PDF keeps its text as text. Text boxes,
+  shapes and table cells edit rich text through TipTap in the element's own text area, so input
+  methods, spellcheck and the clipboard work as they do in Docs. The deck API (`slides/model.ts`)
+  makes each change one step to undo, on the deck in a window or on a file on disk, which is not
+  written over when reading it lost something.
+- **Why not the Canvas engine or Univer Slides.** The first draft drew slides with the Herald
+  Canvas engine, which composited a 1920 by 1080 slide in about 18 ms but could not edit rich text:
+  the caret, selection, input methods, spellcheck and copy and paste would all have been Herald's
+  to build on a canvas. Univer Slides' open-source packages are a skeleton with no Facade API: in
+  1.0.3 a new slide does not appear in the slide list, moving an element does nothing, slide edits
+  cannot be undone, and there is no present mode, layouts or themes.
+- **PowerPoint files through PptxGenJS and a reader of our own.** PptxGenJS (MIT) writes the
+  `.pptx`: a slide layout for each of Herald's layouts with real placeholders, text with its runs
+  and lists, preset shapes, pictures with their crops, backgrounds, the theme, transitions, notes
+  and tables. A finishing pass writes what PptxGenJS cannot say, such as table frames and grids
+  PowerPoint accepts and content types only for the parts a file has, and tests check that every
+  part has a content type and every relationship a part. Files are read with JSZip and Herald's
+  own DrawingML reader: the slide size, text with inherited placeholder formatting, shapes,
+  pictures, backgrounds, notes, positions, flips and rotation, and tables with their table styles
+  worked out into each cell.
+- **Herald's deck inside the file.** A saved file carries Herald's own copy of the deck as a part
+  of its own (`herald/deck.json`, with its content type and a package relationship), which
+  PowerPoint, Keynote and LibreOffice pass over, and a fingerprint of the slides as written. Herald
+  reopens its own files exactly from that copy, and reads a file another app has changed since
+  from its slides. Pictures are not stored twice: the copy names the media parts the slides use.
+- **What Slides costs.** The Slides window loads 0.43 MB (0.13 MB compressed), most of it the
+  TipTap chunk it shares with Docs; PptxGenJS and the finishing pass (0.29 MB) load only when a
+  deck is saved, and the reader (44 KB) and JSZip (96 KB) only when one is opened. Herald maintains
+  the reader and the finishing pass itself, and the pass depends on how PptxGenJS lays out what it
+  writes, so a PptxGenJS upgrade waits for the export tests.
 - **Never less than the file had, silently.** What a file holds that Herald cannot keep is listed
   in a fidelity report, shown before the first save over that file: for a Word file, tracked
   changes, comments, footnotes, headers and footers, text boxes, equations, fields, charts and
-  macros among others; for a workbook, what the package's parts hold that Sheets does not map.
+  macros among others; for a workbook, what the package's parts hold that Sheets does not map; for
+  a presentation, each element counted as kept, approximated or left out, with its charts,
+  SmartArt, media, animations, embedded fonts, OLE objects and macros named.
   Main copies the original into `office-backups` under the Herald OS data folder the first time
   Herald saves over it in a session, with a cap on their size and age. Herald saves a document by
   itself only after the person has saved it once, and stops when a save would lose something new.
@@ -510,10 +536,12 @@ themselves go through the command registry (ADR-014).
   formats stay off in the format table (`shared/office/files.ts`).
 - **Licences.** Univer is Apache-2.0: NOTICE names it and a packaged build carries its licence
   text. electron-builder would also copy Univer's npm packages into `app.asar` (148 MB the renderer
-  bundle already contains), so the build leaves them out. TipTap, ProseMirror, ExcelJS, docx,
-  PptxGenJS and JSZip are MIT (JSZip, licensed MIT or GPL-3.0, is used under MIT). JSZip brings
-  pako, which is MIT and Zlib; the zlib licence is permissive, and Herald already ships pako with
-  Herald Canvas. Everything else they bring in is MIT, Apache-2.0, ISC or BSD: ExcelJS's old
+  bundle already contains), so the build leaves them out, and the Office apps' other libraries too
+  (TipTap and ProseMirror, ExcelJS, docx, PptxGenJS, JSZip, the Markdown parsers and what only
+  they bring in): 58 MB less in `app.asar`, which main never loads. TipTap, ProseMirror, ExcelJS,
+  docx, PptxGenJS and JSZip are MIT (JSZip, licensed MIT or GPL-3.0, is used under MIT). JSZip
+  brings pako, which is MIT and Zlib; the zlib licence is permissive, and Herald already ships pako
+  with Herald Canvas. Everything else they bring in is MIT, Apache-2.0, ISC or BSD: ExcelJS's old
   unzipper is pinned to the 0.12 line and its uuid to 11.1.1, so npm audit finds nothing new.
 
 Alternatives considered:

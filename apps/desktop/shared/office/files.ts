@@ -39,7 +39,7 @@ export const OFFICE_FORMATS: readonly OfficeFormat[] = [
   { extension: '.csv', app: 'sheets', label: 'CSV', kind: 'text', opens: true, saves: true },
   // Off like .odt: Herald Sheets reads only the .xlsx LibreOffice converts to.
   { extension: '.ods', app: 'sheets', label: 'OpenDocument spreadsheet', kind: 'converted', opens: false, saves: false, via: '.xlsx' },
-  { extension: '.pptx', app: 'slides', label: 'PowerPoint presentation', kind: 'office', opens: false, saves: false },
+  { extension: '.pptx', app: 'slides', label: 'PowerPoint presentation', kind: 'office', opens: true, saves: true },
   // Off like .odt: Herald Slides reads only the .pptx LibreOffice converts to.
   { extension: '.odp', app: 'slides', label: 'OpenDocument presentation', kind: 'converted', opens: false, saves: false, via: '.pptx' }
 ]

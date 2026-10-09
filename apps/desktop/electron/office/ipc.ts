@@ -12,6 +12,7 @@ import { OfficeBackups } from './backups.ts'
 import { convertWithLibreOffice, findSoffice } from './convert.ts'
 import { digestOfBytes, FileWatcher, stampOf } from './file-watch.ts'
 import { registerSpellingMenus } from './spelling.ts'
+import { OfficeWatches } from './watches.ts'
 
 /** The largest Office file Herald opens or writes. */
 const MAX_OFFICE_BYTES = 512 * 1024 * 1024
@@ -44,13 +45,7 @@ async function atomicWrite(file: string, bytes: Uint8Array): Promise<void> {
   }
 }
 
-interface Watch {
-  watcher: FileWatcher
-  owner: WebContents
-  file: string
-}
-
-const watches = new Map<string, Watch>()
+const watches = new OfficeWatches()
 
 /** What each Office window has open, by web contents and app (desktop mode has all three in one window). */
 const presence = new Map<string, OfficePresence>()
@@ -72,6 +67,9 @@ function ownerOf(app: OfficeApp, key: string): WebContents | null {
 
   return null
 }
+
+/** Web contents whose closing already clears their presence: one listener each, however often they report. */
+const reporting = new WeakSet<WebContents>()
 
 function windowFor(sender: WebContents, fallback: () => BrowserWindow | null): BrowserWindow | undefined {
   return BrowserWindow.fromWebContents(sender) ?? fallback() ?? undefined
@@ -183,8 +181,8 @@ export function registerOfficeIpc(getWindow: () => BrowserWindow | null): void {
       return digest
     }
     // This window's own save is not an outside change for it; other windows on the file still reload.
-    const own = [...watches.values()].find((watch) => watch.file === file && watch.owner === event.sender)
-    await (own ? own.watcher.ownWrite(write) : write())
+    const own = watches.find(file, event.sender)
+    await (own ? own.ownWrite(write) : write())
 
     if (backup) {
       log('office', `backed up ${path.basename(file)} to ${backup}`)
@@ -212,22 +210,13 @@ export function registerOfficeIpc(getWindow: () => BrowserWindow | null): void {
       setTimeout(() => void watcher.check(), 0)
     }
 
-    watches.set(watchId, { watcher, owner, file })
-    owner.once('destroyed', () => {
-      watcher.stop()
-      watches.delete(watchId)
-    })
+    watches.add(watchId, owner, file, watcher)
 
     return watchId
   })
 
   ipcMain.handle(IPC.officeUnwatch, (event, watchId: string) => {
-    const watch = watches.get(String(watchId))
-
-    if (watch && watch.owner === event.sender) {
-      watch.watcher.stop()
-      watches.delete(String(watchId))
-    }
+    watches.remove(String(watchId), event.sender)
   })
 
   ipcMain.on(IPC.officeReport, (event, report: Omit<OfficePresence, 'at'> & { focused?: boolean }) => {
@@ -235,13 +224,16 @@ export function registerOfficeIpc(getWindow: () => BrowserWindow | null): void {
       return
     }
 
-    const key = `${event.sender.id}:${report.app}`
+    const sender = event.sender
+    const key = `${sender.id}:${report.app}`
     const known = presence.get(key)
 
-    if (!known) {
-      event.sender.once('destroyed', () => {
+    if (!reporting.has(sender)) {
+      const id = sender.id
+      reporting.add(sender)
+      sender.once('destroyed', () => {
         for (const app of OFFICE_APPS) {
-          presence.delete(`${event.sender.id}:${app}`)
+          presence.delete(`${id}:${app}`)
         }
       })
     }
