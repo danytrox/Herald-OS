@@ -42,7 +42,11 @@ describe('networkKey', () => {
 })
 
 describe('hookScripts', () => {
-  it('runs executable scripts in name order, skipping samples and dotfiles', () => {
+  // Windows has no exec bit, so this discovery test is POSIX-only; Windows hook discovery
+  // belongs to the Win32 platform work.
+  const itPosix = process.platform === 'win32' ? it.skip : it
+
+  itPosix('runs executable scripts in name order, skipping samples and dotfiles', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'herald-hooks-'))
     const write = (name: string, mode: number) => fs.writeFileSync(path.join(dir, name), '#!/bin/sh\n', { mode })
 
