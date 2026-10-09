@@ -40,7 +40,8 @@ describe('ensureBridgePlugin', () => {
     fs.rmSync(root, { recursive: true, force: true })
   })
 
-  /** An app bundle, a Hermes home, and a `hermes` that logs its arguments and answers `config get` with `toolSearch`. */
+  /** An app bundle, a Hermes home, and a `hermes` stand-in (a tiny Node script) that logs its
+   *  arguments, runs the test's extra snippet, and answers `config get` with `toolSearch`. */
   function setUp(script = '', toolSearch = 'auto') {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-'))
     const resources = path.join(root, 'Herald OS.app', 'Contents', 'Resources')
@@ -48,8 +49,17 @@ describe('ensureBridgePlugin', () => {
     fs.writeFileSync(path.join(resources, 'herald-os-bridge', 'plugin.yaml'), 'name: herald-os-bridge\n')
     process.env.HERMES_HOME = path.join(root, 'hermes')
     const calls = path.join(root, 'calls.txt')
-    const body = `echo "$*" >> '${calls}'; ${script} [ "$1 $2" = "config get" ] && echo '${toolSearch}'; exit 0`
-    const runtime = { kind: 'path' as const, label: 'test', command: ['/bin/sh', '-c', body, 'hermes'] }
+    // A POSIX shell cannot be spawned by Node on Windows, so the old `/bin/sh -c` mock never ran
+    // there. A Node script works on every platform.
+    const mock = path.join(root, 'hermes-mock.cjs')
+    fs.writeFileSync(mock, [
+      'const fs = require("node:fs")',
+      'const args = process.argv.slice(2)',
+      `fs.appendFileSync(${JSON.stringify(calls)}, args.join(" ") + "\\n")`,
+      script,
+      `if (args[0] === "config" && args[1] === "get") process.stdout.write(${JSON.stringify(toolSearch)})`,
+    ].join('\n'))
+    const runtime = { kind: 'path' as const, label: 'test', command: [process.execPath, mock] }
     const herald = (name: string) => path.join(root, 'hermes', 'herald-os', name)
 
     return { resources, runtime, calls: () => fs.readFileSync(calls, 'utf8').trim().split('\n'), herald }
@@ -80,7 +90,7 @@ describe('ensureBridgePlugin', () => {
   })
 
   it('stops at a failed step, says why, and tries again on the next start', async () => {
-    const { resources, runtime, calls, herald } = setUp('exit 1;')
+    const { resources, runtime, calls, herald } = setUp('process.exit(1)')
 
     expect(await ensureBridgePlugin(runtime, resources)).toMatch(/^hermes plugins enable herald-os-bridge failed/)
     await ensureBridgePlugin(runtime, resources)
@@ -89,7 +99,7 @@ describe('ensureBridgePlugin', () => {
   })
 
   it('counts a ✗ line as a failure even when hermes exits 0', async () => {
-    const { resources, runtime, calls, herald } = setUp(`[ "$1" = tools ] && echo "✗ Unknown toolset 'herald_os'";`)
+    const { resources, runtime, calls, herald } = setUp('if (args[0] === "tools") process.stdout.write("✗ Unknown toolset \'herald_os\'")')
 
     expect(await ensureBridgePlugin(runtime, resources)).toContain("Unknown toolset 'herald_os'")
     expect(calls()).toEqual(['plugins enable herald-os-bridge', 'tools enable herald_os'])
